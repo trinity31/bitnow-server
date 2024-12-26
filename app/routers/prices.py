@@ -7,7 +7,7 @@ router = APIRouter()
 @router.get("/prices")
 async def get_prices():
     """
-    BTC의 현재 원화(KRW)와 달러(USD) 가격 및 각각의 24시간 변동률을 조회합니다.
+    BTC의 현재 원화(KRW)와 달러(USD) 가격, 각각의 24시간 변동률, 김치 프리미엄을 조회합니다.
 
     Returns:
         dict: {
@@ -15,6 +15,7 @@ async def get_prices():
             "btc_usd": float,  # 달러 가격
             "krw_change_24h": float,  # KRW 마켓 24시간 변동률 (%)
             "usd_change_24h": float,  # USD 마켓 24시간 변동률 (%)
+            "kimchi_premium": float,  # 김치 프리미엄 (%)
             "timestamp": int    # 타임스탬프
         }
     """
@@ -28,12 +29,13 @@ async def get_prices():
 @router.get("/prices/krw")
 async def get_krw_prices():
     """
-    BTC의 현재 원화(KRW) 가격과 24시간 변동률을 조회합니다.
+    BTC의 현재 원화(KRW) 가격, 24시간 변동률, 김치 프리미엄을 조회합니다.
 
     Returns:
         dict: {
             "btc_krw": float,  # 원화 가격
             "percent_change_24h": float,  # 24시간 변동률 (%)
+            "kimchi_premium": float,  # 김치 프리미엄 (%)
             "timestamp": int    # 타임스탬프
         }
     """
