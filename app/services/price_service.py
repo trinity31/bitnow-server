@@ -28,11 +28,14 @@ async def get_binance_price() -> Tuple[float, float]:
 
 
 async def calculate_kimchi_premium(krw_price: float, usd_price: float) -> float:
-    """김치 프리미엄을 계산합니다."""
-    # 실시간 환율 조회
+    """
+    김치 프리미엄을 계산합니다.
+    계산식: ((업비트가격 - (바이낸스가격 * 환율)) / (바이낸스가격 * 환율)) * 100
+    """
     exchange_rate = await exchange_service.get_usd_krw_rate()
-    # 김치 프리미엄 계산 (%)
-    kimchi_premium = ((krw_price / (usd_price * exchange_rate)) - 1) * 100
+    binance_krw = usd_price * exchange_rate
+    kimchi_premium = ((krw_price - binance_krw) / binance_krw) * 100
+
     return round(kimchi_premium, 2)
 
 
@@ -67,6 +70,7 @@ async def get_current_prices() -> Dict[str, Any]:
         get_upbit_price(), get_binance_price()
     )
 
+    print("\n=== 가격 정보 ===")
     kimchi_premium = await calculate_kimchi_premium(krw_price, usd_price)
 
     return {
