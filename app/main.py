@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import prices
+from app.routers import prices, indicator_router
 
 app = FastAPI(title="BitNow API")
 
@@ -15,3 +15,4 @@ app.add_middleware(
 
 # 라우터 등록
 app.include_router(prices.router)
+app.include_router(indicator_router.router)
