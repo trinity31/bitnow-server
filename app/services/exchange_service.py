@@ -3,7 +3,12 @@ from typing import Optional
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
-from app.constants import DEFAULT_USD_KRW_RATE, CACHE_DURATION_HOURS
+from app.constants import (
+    DEFAULT_USD_KRW_RATE,
+    CACHE_DURATION_HOURS,
+    EXCHANGE_RATE_API_URL,
+    ALPHA_VANTAGE_URL,
+)
 import pandas as pd
 from typing import List, Dict, Any
 
@@ -13,10 +18,9 @@ load_dotenv()
 
 class ExchangeRateService:
     def __init__(self):
-        self.base_url = (
-            "https://www.koreaexim.go.kr/site/program/financial/exchangeJSON"
-        )
-        self.api_key = os.getenv("EXCHANGE_API_KEY")
+        self.primary_url = EXCHANGE_RATE_API_URL
+        self.backup_url = ALPHA_VANTAGE_URL
+        self.api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
         self._cached_rate: Optional[float] = None
         self._last_updated: Optional[datetime] = None
 
@@ -35,61 +39,59 @@ class ExchangeRateService:
         self._last_updated = datetime.now()
         print(f"조회된 환율: {rate}")
 
+    async def _fetch_from_er_api(self) -> Optional[float]:
+        """ExchangeRate-API에서 환율 조회"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.primary_url) as response:
+                    print("ExchangeRate-API Response status:", response.status)
+                    if response.status == 200:
+                        data = await response.json()
+                        return data["rates"]["KRW"]
+        except Exception as e:
+            print(f"ExchangeRate-API 조회 실패: {str(e)}")
+            return None
+
+    async def _fetch_from_alpha_vantage(self) -> Optional[float]:
+        """Alpha Vantage에서 환율 조회"""
+        params = {
+            "function": "CURRENCY_EXCHANGE_RATE",
+            "from_currency": "USD",
+            "to_currency": "KRW",
+            "apikey": self.api_key,
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.backup_url, params=params) as response:
+                    print("Alpha Vantage Response status:", response.status)
+                    if response.status == 200:
+                        data = await response.json()
+                        return float(
+                            data["Realtime Currency Exchange Rate"]["5. Exchange Rate"]
+                        )
+        except Exception as e:
+            print(f"Alpha Vantage 조회 실패: {str(e)}")
+            return None
+
     async def get_usd_krw_rate(self) -> float:
-        """USD/KRW 환율을 조회합니다. 1시간 캐시를 사용합니다."""
+        """USD/KRW 환율을 조회합니다."""
         if self._is_cache_valid():
             return self._cached_rate
 
-        # 오늘 날짜로 시도
-        today = datetime.now()
-        rate = await self._fetch_exchange_rate(today)
+        # 첫 번째 API 시도
+        rate = await self._fetch_from_er_api()
 
-        # 오늘 데이터가 없으면 어제 날짜로 재시도
+        # 실패하면 백업 API 시도
         if rate is None:
-            yesterday = today - timedelta(days=1)
-            rate = await self._fetch_exchange_rate(yesterday)
+            rate = await self._fetch_from_alpha_vantage()
 
-            # 어제 데이터도 없으면 기본값 사용
-            if rate is None:
-                print("환율 데이터를 찾을 수 없습니다. 기본값을 사용합니다.")
-                return DEFAULT_USD_KRW_RATE
+        # 모두 실패하면 기본값 사용
+        if rate is None:
+            print("모든 API 조회 실패. 기본값 사용")
+            return DEFAULT_USD_KRW_RATE
 
+        self._update_cache(rate)
         return rate
-
-    async def _fetch_exchange_rate(self, date: datetime) -> Optional[float]:
-        """특정 날짜의 환율을 조회합니다."""
-        params = {
-            "authkey": self.api_key,
-            "searchdate": date.strftime("%Y%m%d"),
-            "data": "AP01",
-        }
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(self.base_url, params=params) as response:
-                    print(f"Fetching exchange rate for {date.strftime('%Y-%m-%d')}")
-                    print("Response status:", response.status)
-
-                    if response.status != 200:
-                        return None
-
-                    data = await response.json()
-                    print("Response data:", data)
-
-                    if not data or not isinstance(data, list):
-                        return None
-
-                    for item in data:
-                        if item.get("cur_unit") == "USD":
-                            rate = float(item["tts"].replace(",", ""))
-                            self._update_cache(rate)
-                            return rate
-
-                    return None
-
-        except Exception as e:
-            print(f"환율 조회 중 오류 발생: {str(e)}")
-            return None
 
     async def get_candles(
         self, symbol: str = "BTC", interval: str = "15m", length: int = 14

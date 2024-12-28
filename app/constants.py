@@ -2,6 +2,10 @@
 DEFAULT_USD_KRW_RATE = 1450.0
 CACHE_DURATION_HOURS = 1
 
+# Exchange Rate API URLs
+EXCHANGE_RATE_API_URL = "https://open.er-api.com/v6/latest/USD"
+ALPHA_VANTAGE_URL = "https://www.alphavantage.co/query"
+
 # RSI 관련 상수
 DEFAULT_RSI_LENGTH = 14
 DEFAULT_RSI_INTERVAL = "minute15"
