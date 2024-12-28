@@ -31,3 +31,12 @@ MOCK_MVRV = 2.88
 BINANCE_API_URL = "https://api.binance.com/api/v3"
 
 TAAPI_URL = "https://api.taapi.io"
+
+# WebSocket URLs
+UPBIT_WS_URL = "wss://api.upbit.com/websocket/v1"
+BINANCE_WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@trade"
+
+# WebSocket Constants
+DEFAULT_PING_INTERVAL = 30  # 30초마다 ping
+MAX_RECONNECT_ATTEMPTS = 5
+RECONNECT_DELAY = 5  # 5초 후 재접속

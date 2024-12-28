@@ -18,6 +18,7 @@
 ### 설치 방법
 
 #### 1. 저장소 클론
+
 git clone [저장소 URL]
 cd [프로젝트 디렉토리]
 
@@ -26,14 +27,18 @@ cd [프로젝트 디렉토리]
 python -m venv venv
 
 ##### Windows
+
 venv\Scripts\activate
 
 ##### macOS/Linux
+
 source venv/bin/activate
 
 #### 3. 설치
+
 pip install -r requirements.txt
 
 #### 4. 실행
+
 uvicorn app.main:app --reload
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
