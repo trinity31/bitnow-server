@@ -28,6 +28,7 @@ class Alert(Base):
     threshold = Column(Float)
     direction = Column(String)  # above, below
     interval = Column(String, nullable=True)  # RSI용 (15m, 1h, 4h, 1d)
+    currency = Column(String, default="KRW")  # KRW 또는 USD
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

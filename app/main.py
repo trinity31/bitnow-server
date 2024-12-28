@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from app.routers import prices, indicator_router, ws_router, auth_router
+from app.routers import prices, indicator_router, ws_router, auth_router, alerts_router
 from app.services.stream_service import stream_service
 import asyncio
 import logging
@@ -50,6 +50,10 @@ app.include_router(
 app.include_router(
     ws_router.router,
     tags=["websocket"],
+)
+app.include_router(
+    alerts_router.router,
+    tags=["alerts"],
 )
 
 
