@@ -14,6 +14,8 @@ from app.constants import (
 import aiohttp
 from app.services.exchange_service import exchange_service  # 환율 서비스 import
 from app.services.indicator_service import indicator_service  # RSI 서비스 import
+from app.services.alert_service import alert_service
+from app.database import async_session  # 추가
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,6 +43,7 @@ class PriceStreamService:
         self.running = False
         self.last_broadcast_time = datetime.now()
         self.broadcast_interval = 1.0  # 1초로 변경
+        self.db_session = None  # 추가
 
     async def calculate_kimchi_premium(
         self, krw_price: float, usd_price: float
@@ -164,17 +167,20 @@ class PriceStreamService:
     async def broadcast(self, message: Dict[str, Any]):
         """연결된 모든 클라이언트에게 메시지 전송"""
         if self.clients:
+            # DB 세션 생성
+            async with async_session() as session:
+                # 알림 조건 체크
+                await alert_service.process_market_data(session, message)
+
+            # 기존 브로드캐스트 로직
             disconnected_clients = set()
             message_str = json.dumps(message)
-
             for client in self.clients:
                 try:
                     await client.send_text(message_str)
                 except Exception as e:
                     logger.error(f"Failed to send message to client: {str(e)}")
                     disconnected_clients.add(client)
-
-            # 연결 끊긴 클라이언트 제거
             self.clients -= disconnected_clients
 
     async def add_client(self, websocket: websockets.WebSocketServerProtocol):

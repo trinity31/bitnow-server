@@ -1,3 +1,8 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Exchange Rate Constants
 DEFAULT_USD_KRW_RATE = 1450.0
 CACHE_DURATION_HOURS = 1
@@ -40,3 +45,6 @@ BINANCE_WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@trade"
 DEFAULT_PING_INTERVAL = 30  # 30초마다 ping
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_DELAY = 5  # 5초 후 재접속
+
+# FCM 설정
+FCM_SERVER_KEY = os.getenv("FCM_SERVER_KEY")
