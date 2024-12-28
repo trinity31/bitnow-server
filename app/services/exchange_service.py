@@ -40,29 +40,56 @@ class ExchangeRateService:
         if self._is_cache_valid():
             return self._cached_rate
 
+        # 오늘 날짜로 시도
+        today = datetime.now()
+        rate = await self._fetch_exchange_rate(today)
+
+        # 오늘 데이터가 없으면 어제 날짜로 재시도
+        if rate is None:
+            yesterday = today - timedelta(days=1)
+            rate = await self._fetch_exchange_rate(yesterday)
+
+            # 어제 데이터도 없으면 기본값 사용
+            if rate is None:
+                print("환율 데이터를 찾을 수 없습니다. 기본값을 사용합니다.")
+                return DEFAULT_USD_KRW_RATE
+
+        return rate
+
+    async def _fetch_exchange_rate(self, date: datetime) -> Optional[float]:
+        """특정 날짜의 환율을 조회합니다."""
         params = {
             "authkey": self.api_key,
-            "searchdate": datetime.now().strftime("%Y%m%d"),
+            "searchdate": date.strftime("%Y%m%d"),
             "data": "AP01",
         }
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(self.base_url, params=params) as response:
-                if response.status != 200:
-                    return DEFAULT_USD_KRW_RATE
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.base_url, params=params) as response:
+                    print(f"Fetching exchange rate for {date.strftime('%Y-%m-%d')}")
+                    print("Response status:", response.status)
 
-                data = await response.json()
-                if not data or not isinstance(data, list):
-                    return DEFAULT_USD_KRW_RATE
+                    if response.status != 200:
+                        return None
 
-                for item in data:
-                    if item.get("cur_unit") == "USD":
-                        # 송금받을때 환율(tts) 사용
-                        rate = float(item["tts"].replace(",", ""))
-                        self._update_cache(rate)
-                        return rate
+                    data = await response.json()
+                    print("Response data:", data)
 
-                return DEFAULT_USD_KRW_RATE
+                    if not data or not isinstance(data, list):
+                        return None
+
+                    for item in data:
+                        if item.get("cur_unit") == "USD":
+                            rate = float(item["tts"].replace(",", ""))
+                            self._update_cache(rate)
+                            return rate
+
+                    return None
+
+        except Exception as e:
+            print(f"환율 조회 중 오류 발생: {str(e)}")
+            return None
 
     async def get_candles(
         self, symbol: str = "BTC", interval: str = "15m", length: int = 14
