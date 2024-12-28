@@ -136,3 +136,28 @@ async def delete_user(
         return {"message": "User account deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete user: {str(e)}")
+
+
+class FCMTokenUpdate(BaseModel):
+    fcm_token: str
+
+
+@router.put("/auth/fcm-token", tags=["auth"])
+async def update_fcm_token(
+    token_data: FCMTokenUpdate,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """FCM 토큰 업데이트"""
+    try:
+        current_user.fcm_token = token_data.fcm_token
+        await session.commit()
+        return {"message": "FCM token updated successfully"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "UPDATE_FAILED",
+                "message": "FCM 토큰 업데이트에 실패했습니다",
+            },
+        )
