@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Query
-from typing import Optional
+from fastapi import APIRouter, Query, Depends, HTTPException
+from typing import Optional, Dict, Any
 from ..services.indicator_service import IndicatorService
 from ..constants import (
     DEFAULT_RSI_LENGTH,
@@ -8,9 +8,17 @@ from ..constants import (
     RSI_INTERVALS,
 )
 import asyncio
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.database import get_session
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/indicator", tags=["indicators"])
 indicator_service = IndicatorService()
+
+
+# MVRV 업데이트를 위한 요청 모델
+class MVRVUpdate(BaseModel):
+    value: float
 
 
 @router.get("/rsi")
@@ -45,6 +53,83 @@ async def get_btc_dominance():
 
 
 @router.get("/mvrv")
-async def get_mvrv():
-    """MVRV를 조회하는 엔드포인트"""
-    return await indicator_service.get_mvrv()
+async def get_mvrv(db: AsyncSession = Depends(get_session)) -> Dict[str, Any]:
+    """
+    현재 MVRV 값을 조회합니다.
+
+    Returns:
+        dict: {
+            "mvrv": float,  # MVRV 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    return await indicator_service.get_mvrv(db)
+
+
+@router.post("/mvrv")
+async def create_mvrv(
+    data: MVRVUpdate,
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    새로운 MVRV 값을 생성합니다.
+
+    Args:
+        data (MVRVUpdate): 생성할 MVRV 데이터
+            - value (float): MVRV 값
+
+    Returns:
+        dict: {
+            "mvrv": float,  # 생성된 MVRV 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    try:
+        return await indicator_service.create_mvrv(db, data.value)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/mvrv")
+async def update_mvrv(
+    data: MVRVUpdate,
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    가장 최근 MVRV 값을 업데이트합니다.
+
+    Args:
+        data (MVRVUpdate): 업데이트할 MVRV 데이터
+            - value (float): 새로운 MVRV 값
+
+    Returns:
+        dict: {
+            "mvrv": float,  # 업데이트된 MVRV 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    try:
+        return await indicator_service.update_mvrv(db, data.value)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/mvrv")
+async def delete_mvrv(
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    가장 최근 MVRV 값을 삭제합니다.
+
+    Returns:
+        dict: {
+            "mvrv": float,  # 삭제된 MVRV 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    try:
+        return await indicator_service.delete_latest_mvrv(db)
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

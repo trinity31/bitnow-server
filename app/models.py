@@ -12,6 +12,7 @@ class User(Base):
     email = Column(String, unique=True)
     password = Column(String)  # 해시된 비밀번호
     fcm_token = Column(String, nullable=True)
+    is_admin = Column(Boolean, default=False)  # 관리자 여부
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -40,3 +41,11 @@ class Alert(Base):
 class ErrorResponse(BaseModel):
     code: str
     message: str
+
+
+class MVRVIndicator(Base):
+    __tablename__ = "mvrv_indicators"
+
+    id = Column(Integer, primary_key=True)
+    value = Column(Float, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

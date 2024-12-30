@@ -177,6 +177,42 @@ class AlertService:
 
         return message
 
+    async def check_and_trigger_alert(
+        self, session: AsyncSession, alert: Alert, market_data: Dict[str, Any]
+    ):
+        """알림 조건을 체크하고 조건 충족 시 알림을 트리거합니다."""
+        try:
+            # 마지막 트리거 시간 체크
+            last_trigger = self.last_trigger_times.get(alert.id)
+            if (
+                last_trigger
+                and (datetime.now() - last_trigger).total_seconds()
+                < self.min_trigger_interval
+            ):
+                return
+
+            should_trigger = False
+
+            # 알림 타입별 체크
+            if alert.type == "price":
+                should_trigger = await self.check_price_alert(alert, market_data)
+            elif alert.type == "rsi" and alert.interval in market_data["rsi"]:
+                should_trigger = await self.check_rsi_alert(
+                    alert, market_data["rsi"][alert.interval]
+                )
+            elif alert.type == "kimchi_premium":
+                should_trigger = await self.check_premium_alert(
+                    alert, market_data["kimchi_premium"]
+                )
+
+            # 조건 충족 시 알림 트리거
+            if should_trigger:
+                await self.trigger_alert(session, alert)
+                self.last_trigger_times[alert.id] = datetime.now()
+
+        except Exception as e:
+            logger.error(f"알림 체크 중 오류 발생: {str(e)}")
+
 
 # 싱글톤 인스턴스 생성
 alert_service = AlertService()

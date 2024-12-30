@@ -21,6 +21,10 @@ import time
 import asyncio
 from datetime import datetime
 import logging
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.sql import desc
+from app.models import MVRVIndicator
 
 logger = logging.getLogger(__name__)
 
@@ -96,32 +100,29 @@ class IndicatorService:
                 "timestamp": datetime.now().isoformat(),
             }
 
-    async def get_mvrv(self) -> Dict[str, Any]:
+    async def get_mvrv(self, db: AsyncSession) -> Dict[str, Any]:
         """MVRV(Market Value to Realized Value) 조회"""
         try:
-            url = f"{GLASSNODE_API_URL}/metrics/market/mvrv"
-            params = {
-                "api_key": self.glassnode_api_key,
-                "asset": "BTC",
-                "timestamp_format": "humanized",
+            # DB에서 최신 MVRV 값 조회
+            query = (
+                select(MVRVIndicator).order_by(desc(MVRVIndicator.created_at)).limit(1)
+            )
+            result = await db.execute(query)
+            latest = result.scalar_one_or_none()
+
+            print("latest", latest)
+
+            if latest:
+                return {
+                    "mvrv": round(float(latest.value), 2),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+
+            # DB에 값이 없으면 기본값 반환
+            return {
+                "mvrv": MOCK_MVRV,
+                "timestamp": datetime.now().isoformat(),
             }
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data and len(data) > 0:
-                            latest_mvrv = data[-1]["value"]  # 가장 최근 값
-                            return {
-                                "mvrv": round(float(latest_mvrv), 2),
-                                "timestamp": datetime.now().isoformat(),
-                            }
-
-                    logger.warning("Glassnode API 호출 실패, 기본값 사용")
-                    return {
-                        "mvrv": MOCK_MVRV,
-                        "timestamp": datetime.now().isoformat(),
-                    }
 
         except Exception as e:
             logger.error(f"MVRV 조회 중 오류 발생: {str(e)}")
@@ -129,6 +130,82 @@ class IndicatorService:
                 "mvrv": MOCK_MVRV,
                 "timestamp": datetime.now().isoformat(),
             }
+
+    async def create_mvrv(self, db: AsyncSession, value: float) -> Dict[str, Any]:
+        """새로운 MVRV 값을 생성합니다."""
+        try:
+            new_mvrv = MVRVIndicator(value=value)
+            db.add(new_mvrv)
+            await db.commit()
+            await db.refresh(new_mvrv)
+
+            return {
+                "mvrv": round(float(new_mvrv.value), 2),
+                "timestamp": new_mvrv.created_at.isoformat(),
+            }
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"MVRV 생성 중 오류 발생: {str(e)}")
+            raise
+
+    async def update_mvrv(self, db: AsyncSession, value: float) -> Dict[str, Any]:
+        """가장 최근 MVRV 값을 업데이트합니다."""
+        try:
+            # 가장 최근 MVRV 레코드 조회
+            query = (
+                select(MVRVIndicator).order_by(desc(MVRVIndicator.created_at)).limit(1)
+            )
+            result = await db.execute(query)
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                # 기존 레코드 업데이트
+                latest.value = value
+                await db.commit()
+                await db.refresh(latest)
+
+                return {
+                    "mvrv": round(float(latest.value), 2),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+            else:
+                # 레코드가 없으면 새로 생성
+                return await self.create_mvrv(db, value)
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"MVRV 업데이트 중 오류 발생: {str(e)}")
+            raise
+
+    async def delete_latest_mvrv(self, db: AsyncSession) -> Dict[str, Any]:
+        """가장 최근 MVRV 값을 삭제합니다."""
+        try:
+            # 가장 최근 MVRV 레코드 조회
+            query = (
+                select(MVRVIndicator).order_by(desc(MVRVIndicator.created_at)).limit(1)
+            )
+            result = await db.execute(query)
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                # 삭제할 MVRV 정보 저장
+                deleted_info = {
+                    "mvrv": round(float(latest.value), 2),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+                # 레코드 삭제
+                await db.delete(latest)
+                await db.commit()
+                return deleted_info
+            else:
+                raise HTTPException(
+                    status_code=404, detail="삭제할 MVRV 레코드가 없습니다."
+                )
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"MVRV 삭제 중 오류 발생: {str(e)}")
+            raise
 
 
 # 싱글톤 인스턴스 생성

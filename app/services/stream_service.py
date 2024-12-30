@@ -36,7 +36,6 @@ class PriceStreamService:
                 "4h": 0.0,
                 "1d": 0.0,
             },
-            "mvrv": 0.0,
             "dominance": 0.0,
         }
         self.prev_prices: Dict[str, float] = {"krw": 0.0, "usd": 0.0, "timestamp": ""}
@@ -256,25 +255,6 @@ class PriceStreamService:
                 logger.error(f"Error in daily RSI update: {str(e)}")
                 await asyncio.sleep(60)
 
-    async def update_mvrv(self):
-        """MVRV 업데이트"""
-        try:
-            mvrv_data = await indicator_service.get_mvrv()
-            self.current_prices["mvrv"] = mvrv_data["mvrv"]
-            logger.info(f"Updated MVRV: {self.current_prices['mvrv']}")
-        except Exception as e:
-            logger.error(f"Failed to update MVRV: {str(e)}")
-
-    async def start_mvrv_updates(self):
-        """MVRV 주기적 업데이트 (1시간마다)"""
-        while self.running:
-            try:
-                await self.update_mvrv()
-                await asyncio.sleep(60 * 60)  # 1시간 대기
-            except Exception as e:
-                logger.error(f"Error in MVRV update: {str(e)}")
-                await asyncio.sleep(60)
-
     async def update_dominance(self):
         """도미넌스 업데이트"""
         try:
@@ -302,7 +282,6 @@ class PriceStreamService:
 
             # 초기값 설정
             await self.update_all_rsi()
-            await self.update_mvrv()
             await self.update_dominance()
 
             # 업데이트 태스크 시작
@@ -310,7 +289,6 @@ class PriceStreamService:
             asyncio.create_task(self.start_hourly_rsi_updates())
             asyncio.create_task(self.start_4h_rsi_updates())
             asyncio.create_task(self.start_daily_rsi_updates())
-            asyncio.create_task(self.start_mvrv_updates())
             asyncio.create_task(self.start_dominance_updates())
 
             # 기존 태스크들
