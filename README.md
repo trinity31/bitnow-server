@@ -85,6 +85,12 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 - `POST /token`
   - 로그인 및 JWT 토큰 발급
 
+### 터미널에서 웹소켓 연결 테스트
+
+```bash
+websocat ws://localhost:8000/ws/price
+```
+
 ## 데이터 구조
 
 ### WebSocket 메시지 예시
