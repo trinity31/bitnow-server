@@ -1,42 +1,83 @@
-import json
-import aiohttp
-from typing import Dict, Any
+import firebase_admin
+from firebase_admin import credentials, messaging
+import os
 import logging
-from app.constants import FCM_SERVER_KEY
+from dotenv import load_dotenv
 
+load_dotenv()
 logger = logging.getLogger(__name__)
 
 
 class PushService:
     def __init__(self):
-        self.fcm_url = "https://fcm.googleapis.com/fcm/send"
-        self.headers = {
-            "Authorization": f"key={FCM_SERVER_KEY}",
-            "Content-Type": "application/json",
-        }
+        self.initialized = False
+        self.initialize_firebase()
+
+    def initialize_firebase(self):
+        try:
+            if not self.initialized:
+                cred_path = os.getenv("FIREBASE_CREDENTIALS")
+                if cred_path:
+                    cred = credentials.Certificate(cred_path)
+                    firebase_admin.initialize_app(cred)
+                    self.initialized = True
+                    logger.info("Firebase Admin SDK initialized successfully")
+                else:
+                    logger.warning(
+                        "FIREBASE_CREDENTIALS not found in environment variables"
+                    )
+        except Exception as e:
+            logger.error(f"Failed to initialize Firebase: {str(e)}")
 
     async def send_push_notification(self, token: str, title: str, body: str):
-        """FCM 푸시 알림 전송"""
+        """
+        단일 기기에 푸시 알림을 전송합니다.
+        """
         try:
-            payload = {
-                "to": token,
-                "notification": {"title": title, "body": body, "sound": "default"},
-            }
+            if not self.initialized:
+                logger.error("Firebase not initialized")
+                return
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.fcm_url, headers=self.headers, json=payload
-                ) as response:
-                    if response.status == 200:
-                        logger.info(f"Push notification sent successfully to {token}")
-                    else:
-                        logger.error(
-                            f"Failed to send push notification: {response.status}"
-                        )
+            message = messaging.Message(
+                notification=messaging.Notification(
+                    title=title,
+                    body=body,
+                ),
+                token=token,
+            )
+
+            response = messaging.send(message)
+            logger.info(f"Successfully sent message: {response}")
+            return response
 
         except Exception as e:
             logger.error(f"Error sending push notification: {str(e)}")
+            return None
+
+    async def send_multicast_notification(self, tokens: list, title: str, body: str):
+        """
+        여러 기기에 동시에 푸시 알림을 전송합니다.
+        """
+        try:
+            if not self.initialized:
+                logger.error("Firebase not initialized")
+                return
+
+            message = messaging.MulticastMessage(
+                notification=messaging.Notification(
+                    title=title,
+                    body=body,
+                ),
+                tokens=tokens,
+            )
+
+            response = messaging.send_multicast(message)
+            logger.info(f"Successfully sent multicast message: {response}")
+            return response
+
+        except Exception as e:
+            logger.error(f"Error sending multicast push notification: {str(e)}")
+            return None
 
 
-# 싱글톰 인스턴스 생성
 push_service = PushService()

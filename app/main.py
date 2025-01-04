@@ -5,6 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from app.routers import prices, indicator_router, ws_router, auth_router, alerts_router
 from app.services.stream_service import stream_service
+from app.services.push_service import push_service
 import asyncio
 import logging
 from app.database import engine
@@ -59,8 +60,14 @@ app.include_router(
 
 @app.on_event("startup")
 async def startup_event():
-    """서버 시작 시 WebSocket 스트리밍 시작"""
+    """서버 시작 시 WebSocket 스트리밍과 푸시 서비스 시작"""
     asyncio.create_task(stream_service.start())
+    # push_service는 __init__에서 자동으로 초기화되지만,
+    # 초기화 상태를 확인하고 로그를 남깁니다.
+    if not push_service.initialized:
+        logger.error("Push service failed to initialize")
+    else:
+        logger.info("Push service initialized successfully")
 
 
 @app.on_event("shutdown")
