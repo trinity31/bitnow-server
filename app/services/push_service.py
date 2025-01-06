@@ -43,6 +43,16 @@ class PushService:
                     body=body,
                 ),
                 token=token,
+                android=messaging.AndroidConfig(
+                    notification=messaging.AndroidNotification(
+                        channel_id="default_channel_id",
+                        sound="default",  # Android에서도 알림음을 설정하려면 추가
+                    )
+                ),
+                data={
+                    "click_action": "FLUTTER_NOTIFICATION_CLICK",
+                    "type": "price_alert",
+                },
             )
             # 동기 함수를 별도 스레드에서 실행
             response = await asyncio.to_thread(messaging.send, message)
@@ -51,6 +61,7 @@ class PushService:
 
         except Exception as e:
             logger.error(f"Error sending push notification: {str(e)}")
+            logger.exception(e)
             return None
 
 
