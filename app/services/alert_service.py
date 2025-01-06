@@ -9,6 +9,8 @@ from collections import defaultdict
 from sqlalchemy.orm import joinedload
 from sqlalchemy import update
 import aiohttp
+import asyncio  # 락 사용을 위해 필요
+from app.constants import BATCH_CREATE_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,9 @@ class AlertService:
         self.min_trigger_interval = 300  # 5분
         self.last_cache_update = None
         self.cache_ttl = timedelta(minutes=5)
+        # batch_create_count 를 동적으로 관리 (초기값 0)
+        self.batch_create_count = 0
+        self.trigger_lock = asyncio.Lock()  # 알림 트리거 동시성 방지용 락
 
     async def create_alert(
         self, session: AsyncSession, user_id: int, alert_data: Dict[str, Any]
@@ -41,59 +46,28 @@ class AlertService:
                 direction=alert_data["direction"],
                 interval=alert_data.get("interval"),
                 currency=alert_data.get("currency", "KRW"),
-                is_active=True,  # 명시적으로 is_active 설정
+                is_active=True,
             )
             session.add(alert)
-            await session.commit()  # 먼저 commit
-            await session.refresh(alert)  # 그 다음 refresh
+            await session.commit()
+            await session.refresh(alert)
 
-            # 새 알림 생성 시 캐시 즉시 갱신
-            self.last_cache_update = None  # 캐시 TTL 초기화
-            await self.refresh_cache(session)
-            logger.info(f"Created new alert and refreshed cache: {alert.id}")
+            # 현재 batch_create_count 증가
+            self.batch_create_count += 1
 
-            # 현재 시장 데이터로 즉시 알림 조건 체크
-            current_market_data = {
-                "krw": 0.0,
-                "usd": 0.0,
-                "timestamp": datetime.now().isoformat(),
-                "kimchi_premium": 0.0,
-                "rsi": {},
-            }
-
-            # 현재 가격 조회
-            if alert.type == "price":
-                try:
-                    if alert.currency == "KRW":
-                        async with aiohttp.ClientSession() as client:
-                            async with client.get(
-                                "https://api.upbit.com/v1/ticker?markets=KRW-BTC"
-                            ) as response:
-                                if response.status == 200:
-                                    data = await response.json()
-                                    current_market_data["krw"] = float(
-                                        data[0]["trade_price"]
-                                    )
-                    else:  # USD
-                        async with aiohttp.ClientSession() as client:
-                            async with client.get(
-                                "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-                            ) as response:
-                                if response.status == 200:
-                                    data = await response.json()
-                                    current_market_data["usd"] = float(data["price"])
-
-                    # 새로 생성된 알림 조건 즉시 체크
-                    await self.process_market_data(session, current_market_data)
-                    logger.info(
-                        f"Checked new alert {alert.id} with current market data"
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to check new alert condition: {str(e)}")
+            # BATCH_CREATE_THRESHOLD만큼 누적되었을 때만 캐시 갱신
+            if self.batch_create_count >= BATCH_CREATE_THRESHOLD:
+                self.last_cache_update = None
+                await self.refresh_cache(session)
+                logger.info(
+                    f"Batch create threshold reached. "
+                    f"Cache refreshed after {self.batch_create_count} new alerts."
+                )
+                self.batch_create_count = 0
 
             return alert
         except Exception as e:
-            await session.rollback()  # 에러 발생 시 rollback
+            await session.rollback()
             logger.error(f"Failed to create alert: {str(e)}")
             raise
 
@@ -269,54 +243,62 @@ class AlertService:
 
     async def trigger_alert(self, session: AsyncSession, alert: Alert):
         """알림 발생 시 처리"""
-        try:
-            # Alert 객체와 연관된 User 객체를 함께 로드
-            stmt = (
-                select(Alert)
-                .options(joinedload(Alert.user))
-                .where(Alert.id == alert.id)
-            )
-            result = await session.execute(stmt)
-            alert_with_user = result.unique().scalar_one()
-
-            # 알림 발생 시간 업데이트 및 비활성화
-            update_stmt = (
-                update(Alert)
-                .where(Alert.id == alert.id)
-                .values(
-                    triggered_at=datetime.now(),
-                    is_active=False,
-                    updated_at=datetime.now(),
+        async with self.trigger_lock:
+            try:
+                # 동시에 같은 alert를 트리거하지 않도록 락을 걸고 추가 검사
+                check_stmt = (
+                    select(Alert)
+                    .where(Alert.id == alert.id)
+                    .where(Alert.is_active == True)
                 )
-            )
-            await session.execute(update_stmt)
-            await session.commit()
+                result = await session.execute(check_stmt)
+                if not result.scalar_one_or_none():
+                    logger.debug(
+                        f"Alert {alert.id} is already inactive or does not exist, skipping."
+                    )
+                    return
 
-            # 알림 비활성화 후 캐시 즉시 갱신
-            self.last_cache_update = None
-            await self.refresh_cache(session)
-            logger.info(f"Alert {alert.id} deactivated and cache refreshed")
-
-            message = self.create_alert_message(alert_with_user)
-
-            if alert_with_user.user and alert_with_user.user.fcm_token:
-                await push_service.send_push_notification(
-                    token=alert_with_user.user.fcm_token,
-                    title="BitNow 알림",
-                    body=message,
+                stmt = (
+                    select(Alert)
+                    .options(joinedload(Alert.user))
+                    .where(Alert.id == alert.id)
                 )
-                logger.info(f"Alert triggered and notification sent: {message}")
-                logger.debug(
-                    f"Alert {alert_with_user.id} deactivated (is_active=False)"
-                )
-            else:
-                logger.warning(
-                    f"User has no FCM token for alert ID: {alert_with_user.id}"
-                )
+                select_result = await session.execute(stmt)
+                alert_with_user = select_result.unique().scalar_one()
 
-        except Exception as e:
-            logger.error(f"Failed to trigger alert: {str(e)}")
-            logger.exception(e)
+                # 알림 비활성화
+                update_stmt = (
+                    update(Alert)
+                    .where(Alert.id == alert.id)
+                    .values(
+                        triggered_at=datetime.now(),
+                        is_active=False,
+                        updated_at=datetime.now(),
+                    )
+                )
+                await session.execute(update_stmt)
+                await session.commit()
+
+                # 캐시 갱신
+                self.last_cache_update = None
+                await self.refresh_cache(session)
+
+                # 푸시 알림 전송
+                message = self.create_alert_message(alert_with_user)
+                if alert_with_user.user and alert_with_user.user.fcm_token:
+                    await push_service.send_push_notification(
+                        token=alert_with_user.user.fcm_token,
+                        title="BitNow 알림",
+                        body=message,
+                    )
+                    logger.info(f"Alert triggered and notification sent: {message}")
+                else:
+                    logger.warning(
+                        f"User has no FCM token for alert ID: {alert_with_user.id}"
+                    )
+            except Exception as e:
+                logger.error(f"Failed to trigger alert: {str(e)}")
+                logger.exception(e)
 
     def create_alert_message(self, alert: Alert) -> str:
         """알림 메시지 생성"""

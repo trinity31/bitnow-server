@@ -48,3 +48,6 @@ RECONNECT_DELAY = 5  # 5초 후 재접속
 
 # FCM 설정
 FCM_SERVER_KEY = os.getenv("FCM_SERVER_KEY")
+
+# 알림 생성 대량 처리 임계치
+BATCH_CREATE_THRESHOLD = 1
