@@ -33,6 +33,9 @@ class AlertService:
         self.batch_create_count = 0
         self.trigger_lock = asyncio.Lock()  # 알림 트리거 동시성 방지용 락
 
+        # 통화(currency)별로 마지막으로 본 가격 저장
+        self.last_price_by_currency = {"KRW": None, "USD": None}
+
     async def create_alert(
         self, session: AsyncSession, user_id: int, alert_data: Dict[str, Any]
     ) -> Alert:
@@ -82,18 +85,6 @@ class AlertService:
                 f"Active alert: ID={alert.id}, Type={alert.type}, Is_active={alert.is_active}"
             )
         return alerts
-
-    async def check_price_alert(
-        self, alert: Alert, market_data: Dict[str, Any]
-    ) -> bool:
-        """가격 알림 조건 체크"""
-        current_price = (
-            market_data["krw"] if alert.currency == "KRW" else market_data["usd"]
-        )
-
-        if alert.direction == "above":
-            return current_price > alert.threshold
-        return current_price < alert.threshold
 
     async def check_rsi_alert(self, alert: Alert, current_rsi: float) -> bool:
         """RSI 알림 조건 체크"""
@@ -162,39 +153,8 @@ class AlertService:
         try:
             await self.refresh_cache(session)
 
-            # 가격 알림 체크
-            for currency in ["KRW", "USD"]:
-                price = market_data["krw"] if currency == "KRW" else market_data["usd"]
-                logger.debug(
-                    f"Checking price alerts for {currency}. Current price: {price}"
-                )
-
-                # 모든 가격 알림 조건을 체크
-                for threshold in self.alert_cache["price"]:
-                    alerts = [
-                        a
-                        for a in self.alert_cache["price"][threshold]
-                        if a.currency == currency and a.is_active  # is_active 체크 추가
-                    ]
-
-                    if alerts:
-                        logger.debug(
-                            f"Found {len(alerts)} active alerts for threshold {threshold}"
-                        )
-
-                    for alert in alerts:
-                        should_trigger = await self.check_price_alert(
-                            alert, market_data
-                        )
-                        logger.debug(
-                            f"Alert {alert.id} (threshold: {alert.threshold}, direction: {alert.direction}) should trigger: {should_trigger}"
-                        )
-
-                        if should_trigger:
-                            logger.info(
-                                f"Price alert triggered: {alert.id}, Current Price: {price}, Threshold: {alert.threshold}, Direction: {alert.direction}"
-                            )
-                            await self.trigger_alert(session, alert)
+            # price 알림 체크를 별도 메서드로 분리
+            await self.check_price_alerts(session, market_data)
 
             # RSI 알림 체크
             for interval, alerts in self.alert_cache["rsi"].items():
@@ -240,6 +200,50 @@ class AlertService:
         except Exception as e:
             logger.error(f"Error in process_market_data: {str(e)}")
             logger.exception(e)
+
+    async def check_price_alerts(
+        self, session: AsyncSession, market_data: Dict[str, Any]
+    ):
+        """Price 알림 체크 로직 분리"""
+        for currency in ["KRW", "USD"]:
+            new_price = market_data["krw"] if currency == "KRW" else market_data["usd"]
+            old_price = self.last_price_by_currency[currency]
+
+            # 첫 호출이라면 흐름 판단 불가 -> 초기값 저장 후 스킵
+            if old_price is None:
+                self.last_price_by_currency[currency] = new_price
+                continue
+
+            logger.debug(
+                f"Checking price alerts for {currency}. "
+                f"old_price={old_price}, new_price={new_price}"
+            )
+
+            # threshold별 알림 목록을 순회하며 돌파 여부를 체크
+            for threshold, alert_list in self.alert_cache["price"].items():
+                alerts = [
+                    a for a in alert_list if a.currency == currency and a.is_active
+                ]
+
+                for alert in alerts:
+                    crossing = False
+                    if alert.direction == "above":
+                        # 예: (old_price < threshold <= new_price)면 상향 돌파
+                        crossing = old_price < threshold <= new_price
+                    else:
+                        # 예: (old_price > threshold >= new_price)면 하향 돌파
+                        crossing = old_price > threshold >= new_price
+
+                    if crossing:
+                        logger.info(
+                            f"Price alert triggered: {alert.id}, "
+                            f"old_price={old_price}, new_price={new_price}, "
+                            f"threshold={threshold}, direction={alert.direction}"
+                        )
+                        await self.trigger_alert(session, alert)
+
+            # 마지막에 currency별 가격을 갱신
+            self.last_price_by_currency[currency] = new_price
 
     async def trigger_alert(self, session: AsyncSession, alert: Alert):
         """알림 발생 시 처리"""
