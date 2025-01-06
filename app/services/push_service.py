@@ -3,6 +3,7 @@ from firebase_admin import credentials, messaging
 import os
 import logging
 from dotenv import load_dotenv
+import asyncio
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -30,9 +31,7 @@ class PushService:
             logger.error(f"Failed to initialize Firebase: {str(e)}")
 
     async def send_push_notification(self, token: str, title: str, body: str):
-        """
-        단일 기기에 푸시 알림을 전송합니다.
-        """
+        """단일 기기에 푸시 알림을 전송합니다."""
         try:
             if not self.initialized:
                 logger.error("Firebase not initialized")
@@ -45,38 +44,13 @@ class PushService:
                 ),
                 token=token,
             )
-
-            response = messaging.send(message)
+            # 동기 함수를 별도 스레드에서 실행
+            response = await asyncio.to_thread(messaging.send, message)
             logger.info(f"Successfully sent message: {response}")
             return response
 
         except Exception as e:
             logger.error(f"Error sending push notification: {str(e)}")
-            return None
-
-    async def send_multicast_notification(self, tokens: list, title: str, body: str):
-        """
-        여러 기기에 동시에 푸시 알림을 전송합니다.
-        """
-        try:
-            if not self.initialized:
-                logger.error("Firebase not initialized")
-                return
-
-            message = messaging.MulticastMessage(
-                notification=messaging.Notification(
-                    title=title,
-                    body=body,
-                ),
-                tokens=tokens,
-            )
-
-            response = messaging.send_multicast(message)
-            logger.info(f"Successfully sent multicast message: {response}")
-            return response
-
-        except Exception as e:
-            logger.error(f"Error sending multicast push notification: {str(e)}")
             return None
 
 
