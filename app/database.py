@@ -3,12 +3,16 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from sqlalchemy import MetaData
 import os
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./bitnow.db")
 
-engine = create_async_engine(DATABASE_URL, echo=True)
+# SQLAlchemy 로거 비활성화
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
+engine = create_async_engine(DATABASE_URL, echo=False)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 

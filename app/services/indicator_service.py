@@ -42,27 +42,43 @@ class IndicatorService:
         """RSI 계산"""
         try:
             # 캔들 데이터 가져오기 (RSI 계산을 위해 더 많은 데이터 필요)
-            candles = await exchange_service.get_candles(symbol, interval, length * 3)
+            # length * 3 대신 더 많은 데이터를 가져오도록 수정
+            candle_count = {
+                "15m": 100,  # 15분봉 100개
+                "1h": 100,  # 1시간봉 100개
+                "4h": 100,  # 4시간봉 100개
+                "1d": 100,  # 일봉 100개
+            }
+
+            count = candle_count.get(interval, 100)
+            candles = await exchange_service.get_candles(symbol, interval, count)
+
+            if not candles:
+                logger.error(f"캔들 데이터를 가져오지 못했습니다. interval: {interval}")
+                return {"rsi": 50.0, "signal": "neutral"}
 
             # 종가 데이터로 DataFrame 생성
-            closes = [candle["close"] for candle in candles]
+            closes = [float(candle["close"]) for candle in candles]
             df = pd.DataFrame(closes, columns=["close"])
 
             # RSI 계산
-            rsi = ta.rsi(df["close"], length=length).iloc[-1]
+            rsi = ta.rsi(df["close"], length=length)
+            current_rsi = rsi.iloc[-1]
 
             # RSI 값이 NaN인 경우 처리
-            if pd.isna(rsi):
+            if pd.isna(current_rsi):
+                logger.warning(f"RSI 계산 결과가 NaN입니다. interval: {interval}")
                 return {"rsi": 50.0, "signal": "neutral"}
 
             # RSI 값에 따른 신호 결정
             signal = "neutral"
-            if rsi >= 70:
+            if current_rsi >= 70:
                 signal = "overbought"
-            elif rsi <= 30:
+            elif current_rsi <= 30:
                 signal = "oversold"
 
-            return {"rsi": round(float(rsi), 2), "signal": signal}
+            logger.info(f"RSI 계산 완료: {interval} = {round(float(current_rsi), 2)}")
+            return {"rsi": round(float(current_rsi), 2), "signal": signal}
 
         except Exception as e:
             logger.error(f"RSI 계산 중 오류 발생: {str(e)}")

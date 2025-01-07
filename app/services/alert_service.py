@@ -11,6 +11,7 @@ from sqlalchemy import update
 import aiohttp
 import asyncio  # 락 사용을 위해 필요
 from app.constants import BATCH_CREATE_THRESHOLD
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -35,15 +36,38 @@ class AlertService:
 
         # 통화(currency)별로 마지막으로 본 가격 저장
         self.last_price_by_currency = {"KRW": None, "USD": None}
+        # RSI 마지막 값 저장용 딕셔너리 추가
+        self.last_rsi_by_interval = defaultdict(lambda: None)  # interval -> last_rsi
+        self.last_rsi_check = {}  # 각 interval별 마지막 RSI 체크 시간
+        self.rsi_check_interval = 60  # RSI 체크 간격 (초)
 
     async def create_alert(
         self, session: AsyncSession, user_id: int, alert_data: Dict[str, Any]
     ) -> Alert:
         """새로운 알림 조건 생성"""
         try:
+            # 알림 타입 검증
+            valid_types = ["price", "rsi", "kimchi_premium", "dominance", "mvrv"]
+            if alert_data["type"].lower() not in valid_types:
+                raise ValueError(
+                    f"유효하지 않은 알림 타입입니다. ({', '.join(valid_types)})"
+                )
+
+            # RSI 알림인 경우 interval 필수 체크
+            if alert_data["type"].upper() == "RSI":
+                if not alert_data.get("interval") or alert_data["interval"] not in [
+                    "15m",
+                    "1h",
+                    "4h",
+                    "1d",
+                ]:
+                    raise ValueError(
+                        "RSI 알림은 interval이 필수입니다. (15m, 1h, 4h, 1d 중 하나)"
+                    )
+
             alert = Alert(
                 user_id=user_id,
-                type=alert_data["type"],
+                type=alert_data["type"].lower(),  # 소문자로 저장
                 symbol=alert_data["symbol"],
                 threshold=float(alert_data["threshold"]),
                 direction=alert_data["direction"],
@@ -153,53 +177,110 @@ class AlertService:
         try:
             await self.refresh_cache(session)
 
-            # price 알림 체크를 별도 메서드로 분리
+            # price 알림 체크
             await self.check_price_alerts(session, market_data)
-
-            # RSI 알림 체크
-            for interval, alerts in self.alert_cache["rsi"].items():
-                if interval in market_data.get("rsi", {}):
-                    current_rsi = market_data["rsi"][interval]
-                    logger.debug(
-                        f"Checking RSI alerts for {interval}. Current RSI: {current_rsi}"
-                    )
-
-                    for alert in alerts:
-                        should_trigger = await self.check_rsi_alert(alert, current_rsi)
-                        logger.debug(
-                            f"RSI Alert {alert.id} should trigger: {should_trigger}"
-                        )
-
-                        if should_trigger:
-                            logger.info(
-                                f"RSI alert triggered: {alert.id}, RSI: {current_rsi}"
-                            )
-                            await self.trigger_alert(session, alert)
 
             # 김치프리미엄 알림 체크
             if "kimchi_premium" in market_data:
-                current_premium = market_data["kimchi_premium"]
-                logger.debug(
-                    f"Checking premium alerts. Current premium: {current_premium}"
-                )
+                await self.check_kimchi_premium_alerts(session, market_data)
 
-                for alert in self.alert_cache["kimchi_premium"]:
-                    should_trigger = await self.check_premium_alert(
-                        alert, current_premium
-                    )
-                    logger.debug(
-                        f"Premium Alert {alert.id} should trigger: {should_trigger}"
-                    )
+            # 도미넌스 알림 체크
+            if "dominance" in market_data:
+                await self.check_dominance_alerts(session, market_data)
 
-                    if should_trigger:
-                        logger.info(
-                            f"Premium alert triggered: {alert.id}, Premium: {current_premium}"
-                        )
-                        await self.trigger_alert(session, alert)
+            # MVRV 알림 체크
+            if "mvrv" in market_data:
+                await self.check_mvrv_alerts(session, market_data)
 
         except Exception as e:
             logger.error(f"Error in process_market_data: {str(e)}")
             logger.exception(e)
+
+    async def check_kimchi_premium_alerts(
+        self, session: AsyncSession, market_data: Dict[str, Any]
+    ):
+        """김치프리미엄 알림 체크"""
+        try:
+            current_premium = market_data["kimchi_premium"]
+            logger.debug(f"Checking premium alerts. Current premium: {current_premium}")
+
+            for alert in self.alert_cache["kimchi_premium"]:
+                if self._check_threshold_condition(
+                    current_premium, alert.threshold, alert.direction
+                ):
+                    logger.info(
+                        f"Premium alert triggered: {alert.id}, Premium: {current_premium}"
+                    )
+                    await self.trigger_alert(
+                        session,
+                        alert,
+                        {
+                            "type": "kimchi_premium",
+                            "value": current_premium,
+                            "threshold": alert.threshold,
+                            "direction": alert.direction,
+                        },
+                    )
+        except Exception as e:
+            logger.error(f"Error checking kimchi premium alerts: {str(e)}")
+
+    async def check_dominance_alerts(
+        self, session: AsyncSession, market_data: Dict[str, Any]
+    ):
+        """도미넌스 알림 체크"""
+        try:
+            current_dominance = market_data["dominance"]
+            logger.debug(
+                f"Checking dominance alerts. Current dominance: {current_dominance}"
+            )
+
+            for alert in self.alert_cache["dominance"]:
+                if self._check_threshold_condition(
+                    current_dominance, alert.threshold, alert.direction
+                ):
+                    logger.info(
+                        f"Dominance alert triggered: {alert.id}, Dominance: {current_dominance}"
+                    )
+                    await self.trigger_alert(
+                        session,
+                        alert,
+                        {
+                            "type": "dominance",
+                            "value": current_dominance,
+                            "threshold": alert.threshold,
+                            "direction": alert.direction,
+                        },
+                    )
+        except Exception as e:
+            logger.error(f"Error checking dominance alerts: {str(e)}")
+
+    async def check_mvrv_alerts(
+        self, session: AsyncSession, market_data: Dict[str, Any]
+    ):
+        """MVRV 알림 체크"""
+        try:
+            current_mvrv = market_data["mvrv"]
+            logger.debug(f"Checking MVRV alerts. Current MVRV: {current_mvrv}")
+
+            for alert in self.alert_cache["mvrv"]:
+                if self._check_threshold_condition(
+                    current_mvrv, alert.threshold, alert.direction
+                ):
+                    logger.info(
+                        f"MVRV alert triggered: {alert.id}, MVRV: {current_mvrv}"
+                    )
+                    await self.trigger_alert(
+                        session,
+                        alert,
+                        {
+                            "type": "mvrv",
+                            "value": current_mvrv,
+                            "threshold": alert.threshold,
+                            "direction": alert.direction,
+                        },
+                    )
+        except Exception as e:
+            logger.error(f"Error checking MVRV alerts: {str(e)}")
 
     async def check_price_alerts(
         self, session: AsyncSession, market_data: Dict[str, Any]
@@ -245,7 +326,103 @@ class AlertService:
             # 마지막에 currency별 가격을 갱신
             self.last_price_by_currency[currency] = new_price
 
-    async def trigger_alert(self, session: AsyncSession, alert: Alert):
+    async def check_rsi_alerts(
+        self, session: AsyncSession, market_data: Dict[str, Any]
+    ):
+        """RSI 알림 체건 체크"""
+        try:
+            logger.info("RSI 알림 조건 체크 시작")
+            logger.info(f"현재 RSI 데이터: {market_data['rsi']}")
+
+            active_alerts = await self.get_active_alerts(session)
+            logger.info(f"활성화된 알림 개수: {len(active_alerts)}")
+
+            for alert in active_alerts:
+                # 알림 상세 정보 로깅
+                logger.info(
+                    f"알림 상세 정보 - ID: {alert.id}, "
+                    f"Type: {alert.type}, "
+                    f"Interval: {alert.interval}, "
+                    f"Threshold: {alert.threshold}, "
+                    f"Direction: {alert.direction}"
+                )
+
+                if alert.type.upper() != "RSI":
+                    logger.info(f"RSI 알림이 아님 - ID: {alert.id}, Type: {alert.type}")
+                    continue
+
+                # interval이 None이거나 유효하지 않은 경우 스킵
+                if not alert.interval or alert.interval not in [
+                    "15m",
+                    "1h",
+                    "4h",
+                    "1d",
+                ]:
+                    logger.warning(
+                        f"유효하지 않은 interval - ID: {alert.id}, "
+                        f"Interval: {alert.interval}"
+                    )
+                    continue
+
+                current_rsi = market_data["rsi"].get(alert.interval)
+                if current_rsi is None:
+                    logger.warning(f"RSI 데이터 없음 - 간격: {alert.interval}")
+                    continue
+
+                logger.info(
+                    f"- 알림 정보: ID={alert.id}, 간격={alert.interval}, "
+                    f"설정값={alert.threshold}, 현재값={current_rsi}, 방향={alert.direction}"
+                )
+
+                if self._check_threshold_condition(
+                    current_rsi, alert.threshold, alert.direction
+                ):
+                    logger.info(f"알림 조건 충족! ID: {alert.id}")
+                    await self.trigger_alert(
+                        session,
+                        alert,
+                        {
+                            "type": "RSI",
+                            "interval": alert.interval,
+                            "value": current_rsi,
+                            "threshold": alert.threshold,
+                            "direction": alert.direction,
+                        },
+                    )
+                else:
+                    logger.info(
+                        f"알림 조건 미충족 - ID: {alert.id}, "
+                        f"현재값: {current_rsi}, 설정값: {alert.threshold}, 방향: {alert.direction}"
+                    )
+
+        except Exception as e:
+            logger.error(f"RSI 알림 체크 중 오류 발생: {str(e)}")
+            logger.exception(e)
+
+    def _check_threshold_condition(
+        self, current_value: float, threshold: float, direction: str
+    ) -> bool:
+        """임계값 조건 체크 로직"""
+        try:
+            logger.debug(
+                f"임계값 조건 체크: 현재값={current_value}, 기준값={threshold}, 방향={direction}"
+            )
+            if direction == "above":
+                result = current_value > threshold
+            else:  # "below"
+                result = current_value < threshold
+            logger.debug(f"조건 체크 결과: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"임계값 조건 체크 중 오류: {str(e)}")
+            return False
+
+    async def trigger_alert(
+        self,
+        session: AsyncSession,
+        alert: Alert,
+        additional_data: Dict[str, Any] = None,
+    ):
         """알림 발생 시 처리"""
         async with self.trigger_lock:
             try:
@@ -288,14 +465,20 @@ class AlertService:
                 await self.refresh_cache(session)
 
                 # 푸시 알림 전송
-                message = self.create_alert_message(alert_with_user)
+                message = self.create_alert_message(alert_with_user, additional_data)
                 if alert_with_user.user and alert_with_user.user.fcm_token:
-                    await push_service.send_push_notification(
+                    logger.info(
+                        f"Attempting to send notification to token: {alert_with_user.user.fcm_token[:10]}..."
+                    )
+                    response = await push_service.send_push_notification(
                         token=alert_with_user.user.fcm_token,
                         title="BitNow 알림",
                         body=message,
                     )
-                    logger.info(f"Alert triggered and notification sent: {message}")
+                    if response:
+                        logger.info(f"FCM notification sent successfully: {message}")
+                    else:
+                        logger.error("FCM notification failed to send")
                 else:
                     logger.warning(
                         f"User has no FCM token for alert ID: {alert_with_user.id}"
@@ -304,17 +487,43 @@ class AlertService:
                 logger.error(f"Failed to trigger alert: {str(e)}")
                 logger.exception(e)
 
-    def create_alert_message(self, alert: Alert) -> str:
+    def create_alert_message(
+        self, alert: Alert, additional_data: Dict[str, Any] = None
+    ) -> str:
         """알림 메시지 생성"""
-        type_map = {"price": "가격", "rsi": "RSI", "kimchi_premium": "김치프리미엄"}
-        direction_map = {"above": "이상", "below": "이하"}
-
-        alert_type = type_map.get(alert.type, alert.type)
-        direction = direction_map.get(alert.direction, alert.direction)
-
-        message = f"{alert.symbol} {alert_type}이(가) {alert.threshold}{direction}가 되었습니다."
-        if alert.type == "rsi":
-            message = f"{alert.symbol} {alert.interval} {message}"
+        if alert.type == "rsi" and additional_data:
+            direction_text = (
+                "상향 돌파!" if alert.direction == "above" else "하향 돌파!"
+            )
+            message = (
+                f"{alert.symbol} {alert.interval} RSI "
+                f"{alert.threshold} {direction_text}"
+            )
+        elif alert.type == "price":
+            direction_text = (
+                "상향 돌파!" if alert.direction == "above" else "하향 돌파!"
+            )
+            currency = alert.currency or "KRW"
+            price = (
+                f"{alert.threshold:,.0f}"
+                if currency == "KRW"
+                else f"${alert.threshold:,.0f}"
+            )
+            message = f"{alert.symbol} {price} {direction_text}"
+        elif alert.type == "kimchi_premium":
+            direction_text = "이상!" if alert.direction == "above" else "이하!"
+            message = f"{alert.symbol} 김치프리미엄 {alert.threshold}% {direction_text}"
+        elif alert.type == "dominance":
+            direction_text = "이상!" if alert.direction == "above" else "이하!"
+            message = f"{alert.symbol} 도미넌스 {alert.threshold}% {direction_text}"
+        elif alert.type == "mvrv":
+            direction_text = "이상!" if alert.direction == "above" else "이하!"
+            message = f"{alert.symbol} MVRV {alert.threshold} {direction_text}"
+        else:
+            direction_text = (
+                "상향 돌파!" if alert.direction == "above" else "하향 돌파!"
+            )
+            message = f"{alert.symbol} {alert.type} {alert.threshold} {direction_text}"
 
         return message
 

@@ -17,6 +17,9 @@ from app.services.indicator_service import indicator_service  # RSI 서비스 im
 from app.services.alert_service import alert_service
 from app.database import async_session  # 추가
 
+# SQLAlchemy 로거 비활성화 추가
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -206,6 +209,11 @@ class PriceStreamService:
             logger.info(
                 f"Updated RSI for interval {interval}: {self.current_prices['rsi'][interval]}"
             )
+
+            # RSI 업데이트 시마다 알림 체크
+            async with async_session() as session:
+                await alert_service.check_rsi_alerts(session, self.current_prices)
+
         except Exception as e:
             logger.error(f"Failed to update RSI for interval {interval}: {str(e)}")
 
@@ -215,15 +223,16 @@ class PriceStreamService:
             await self.update_rsi(interval)
 
     async def start_rsi_updates(self):
-        """RSI 주기적 업데이트 시작"""
+        """RSI 주기적 업데이트"""
         while self.running:
             try:
-                # 15분 RSI 업데이트
-                await self.update_rsi("15m")
-                await asyncio.sleep(15 * 60)  # 15분 대기
+                # 모든 간격의 RSI를 1분마다 업데이트
+                for interval in ["15m", "1h", "4h", "1d"]:
+                    await self.update_rsi(interval)
+                await asyncio.sleep(60)  # 1분 대기
             except Exception as e:
-                logger.error(f"Error in 15m RSI update: {str(e)}")
-                await asyncio.sleep(60)
+                logger.error(f"RSI 업데이트 중 오류 발생: {str(e)}")
+                await asyncio.sleep(10)  # 오류 발생시 10초 대기
 
     async def start_hourly_rsi_updates(self):
         """1시간 RSI 업데이트"""
@@ -265,88 +274,58 @@ class PriceStreamService:
             logger.error(f"Failed to update Dominance: {str(e)}")
 
     async def start_dominance_updates(self):
-        """도미넌스 주기적 업데이트 (1시간마다)"""
+        """도미넌스 주기적 업데이트 (1분마다)"""
         while self.running:
             try:
                 await self.update_dominance()
-                await asyncio.sleep(60 * 60)  # 1시간 대기
+                await asyncio.sleep(60)  # 1분 대기
             except Exception as e:
                 logger.error(f"Error in Dominance update: {str(e)}")
+                await asyncio.sleep(60)
+
+    async def update_mvrv(self):
+        """MVRV 업데이트"""
+        try:
+            # db 세션 생성
+            async with async_session() as session:
+                mvrv_data = await indicator_service.get_mvrv(session)
+                self.current_prices["mvrv"] = mvrv_data["mvrv"]
+                logger.info(f"Updated MVRV: {self.current_prices['mvrv']}")
+        except Exception as e:
+            logger.error(f"Failed to update MVRV: {str(e)}")
+
+    async def start_mvrv_updates(self):
+        """MVRV 주기적 업데이트 (1분마다)"""
+        while self.running:
+            try:
+                await self.update_mvrv()
+                await asyncio.sleep(60)  # 1분 대기
+            except Exception as e:
+                logger.error(f"Error in MVRV update: {str(e)}")
                 await asyncio.sleep(60)
 
     async def start(self):
         """스트리밍 서비스 시작"""
         try:
             self.running = True
-            logger.info("Starting WebSocket streaming service...")
+            logger.info("WebSocket 스트리밍 서비스 시작 중...")
 
             # 초기값 설정
             await self.update_all_rsi()
             await self.update_dominance()
-
-            # 서버 시작 시 현재 가격으로 알림 조건 체크
-            initial_market_data = {
-                "krw": 0.0,
-                "usd": 0.0,
-                "timestamp": datetime.now().isoformat(),
-                "kimchi_premium": 0.0,
-                "rsi": self.current_prices["rsi"],
-                "dominance": self.current_prices["dominance"],
-            }
-
-            # Upbit 초기 가격 조회
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        "https://api.upbit.com/v1/ticker?markets=KRW-BTC"
-                    ) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            initial_market_data["krw"] = float(data[0]["trade_price"])
-            except Exception as e:
-                logger.error(f"Failed to fetch initial Upbit price: {str(e)}")
-
-            # Binance 초기 가격 조회
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-                    ) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            initial_market_data["usd"] = float(data["price"])
-            except Exception as e:
-                logger.error(f"Failed to fetch initial Binance price: {str(e)}")
-
-            # 초기 김치프리미엄 계산
-            if initial_market_data["krw"] > 0 and initial_market_data["usd"] > 0:
-                initial_market_data["kimchi_premium"] = (
-                    await self.calculate_kimchi_premium(
-                        initial_market_data["krw"], initial_market_data["usd"]
-                    )
-                )
-
-            # 초기 알림 조건 체크 전에 캐시 초기화
-            async with async_session() as session:
-                alert_service.last_cache_update = None  # 캐시 강제 갱신
-                await alert_service.refresh_cache(session)  # 캐시 갱신
-                logger.info("Alert cache initialized on startup")
-                await alert_service.process_market_data(session, initial_market_data)
-                logger.info("Initial alert conditions checked")
+            await self.update_mvrv()  # MVRV 초기값 설정 추가
 
             # 기존 태스크들 시작
             asyncio.create_task(self.start_rsi_updates())
-            asyncio.create_task(self.start_hourly_rsi_updates())
-            asyncio.create_task(self.start_4h_rsi_updates())
-            asyncio.create_task(self.start_daily_rsi_updates())
-            asyncio.create_task(self.start_dominance_updates())
+            asyncio.create_task(self.start_dominance_updates())  # 1시간마다
+            asyncio.create_task(self.start_mvrv_updates())  # MVRV 업데이트 태스크 추가
             asyncio.create_task(self.update_24h_changes())
             asyncio.create_task(self.connect_upbit())
             asyncio.create_task(self.connect_binance())
 
-            logger.info("WebSocket streaming service started successfully")
+            logger.info("WebSocket 스트리밍 서비스가 성공적으로 시작되었습니다")
         except Exception as e:
-            logger.error(f"Failed to start streaming service: {str(e)}")
+            logger.error(f"스트리밍 서비스 시작 실패: {str(e)}")
             self.running = False
 
     async def update_24h_changes(self):
