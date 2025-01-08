@@ -126,6 +126,9 @@ class ExchangeRateService:
                         # [OpenTime, Open, High, Low, Close, Volume, ...]
                         return [
                             {
+                                "timestamp": datetime.fromtimestamp(
+                                    candle[0] / 1000
+                                ).isoformat(),
                                 "open": float(candle[1]),
                                 "high": float(candle[2]),
                                 "low": float(candle[3]),
@@ -139,6 +142,89 @@ class ExchangeRateService:
         except Exception as e:
             print(f"Error fetching candles: {str(e)}")
             raise e
+
+    async def get_binance_candles(
+        self, symbol: str = "BTCUSDT", interval: str = "1d", limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """바이낸스 캔들 데이터 조회"""
+        try:
+            url = "https://api.binance.com/api/v3/klines"
+            params = {"symbol": symbol, "interval": interval, "limit": limit}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # 바이낸스 캔들 데이터 포맷 변환
+                        candles = []
+                        for item in data:
+                            candle = {
+                                "timestamp": datetime.fromtimestamp(
+                                    item[0] / 1000
+                                ).isoformat(),
+                                "open": float(item[1]),
+                                "high": float(item[2]),
+                                "low": float(item[3]),
+                                "close": float(item[4]),
+                                "volume": float(item[5]),
+                            }
+                            candles.append(candle)
+                        return candles
+                    else:
+                        logger.error(f"바이낸스 API 호출 실패: {response.status}")
+                        return []
+
+        except Exception as e:
+            logger.error(f"바이낸스 캔들 데이터 조회 중 오류: {str(e)}")
+            return []
+
+    async def get_upbit_candles(
+        self, market: str = "KRW-BTC", interval: str = "1d", limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """업비트 캔들 데이터 조회"""
+        try:
+            url = "https://api.upbit.com/v1/candles"
+
+            # 업비트 interval 포맷 변환
+            interval_map = {
+                "1d": "days",
+                "1h": "minutes/60",
+                "4h": "minutes/240",
+                "15m": "minutes/15",
+            }
+            upbit_interval = interval_map.get(interval, "days")
+
+            # API 엔드포인트 구성
+            if "minutes" in upbit_interval:
+                url += f"/minutes/{upbit_interval.split('/')[1]}"
+            else:
+                url += f"/{upbit_interval}"
+
+            params = {"market": market, "count": limit}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # 업비트 캔� 데이터 포맷 변환
+                        return [
+                            {
+                                "timestamp": candle["candle_date_time_utc"],
+                                "open": float(candle["opening_price"]),
+                                "high": float(candle["high_price"]),
+                                "low": float(candle["low_price"]),
+                                "close": float(candle["trade_price"]),
+                                "volume": float(candle["candle_acc_trade_volume"]),
+                            }
+                            for candle in data
+                        ]
+                    else:
+                        logger.error(f"업비트 API 호출 실패: {response.status}")
+                        return []
+
+        except Exception as e:
+            logger.error(f"업비트 캔들 데이터 조회 중 오류: {str(e)}")
+            return []
 
 
 # 싱글톤 인스턴스 생성

@@ -40,6 +40,11 @@ class PriceStreamService:
                 "1d": 0.0,
             },
             "dominance": 0.0,
+            "high_3w": {
+                "krw": 0.0,
+                "usd": 0.0,
+                "timestamp": "",
+            },
         }
         self.prev_prices: Dict[str, float] = {"krw": 0.0, "usd": 0.0, "timestamp": ""}
         self.running = False
@@ -280,6 +285,50 @@ class PriceStreamService:
                 logger.error(f"Error in MVRV update: {str(e)}")
                 await asyncio.sleep(60)
 
+    async def update_3w_high(self):
+        """3주 최고가 업데이트"""
+        try:
+            # 바이낸스와 업비트에서 3주치 일봉 데이터 조회
+            candles_upbit = await exchange_service.get_upbit_candles(
+                "KRW-BTC", "1d", 21
+            )  # 3주 = 21일
+            candles_binance = await exchange_service.get_binance_candles(
+                "BTCUSDT", "1d", 21
+            )
+
+            if candles_upbit and candles_binance:
+                # KRW 최고가 계산
+                krw_high = max(float(candle["high"]) for candle in candles_upbit)
+                krw_high_candle = max(candles_upbit, key=lambda x: float(x["high"]))
+
+                # USD 최고가 계산
+                usd_high = max(float(candle["high"]) for candle in candles_binance)
+                usd_high_candle = max(candles_binance, key=lambda x: float(x["high"]))
+
+                self.current_prices["high_3w"] = {
+                    "krw": krw_high,
+                    "usd": usd_high,
+                    "krw_timestamp": krw_high_candle["timestamp"],
+                    "usd_timestamp": usd_high_candle["timestamp"],
+                }
+
+                logger.info(
+                    f"3주 최고가 업데이트 - KRW: {krw_high:,.0f}, USD: {usd_high:,.2f}"
+                )
+
+        except Exception as e:
+            logger.error(f"3주 최고가 업데이트 중 오류 발생: {str(e)}")
+
+    async def start_3w_high_updates(self):
+        """3주 최고가 주기적 업데이트 (24시간마다)"""
+        while self.running:
+            try:
+                await self.update_3w_high()
+                await asyncio.sleep(24 * 60 * 60)  # 24시간 대기
+            except Exception as e:
+                logger.error(f"3주 최고가 업데이트 태스크 오류: {str(e)}")
+                await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
+
     async def start(self):
         """스트리밍 서비스 시작"""
         try:
@@ -289,13 +338,17 @@ class PriceStreamService:
             # 초기값 설정
             await self.update_all_rsi()
             await self.update_dominance()
-            await self.update_mvrv()  # MVRV 초기값 설정 추가
+            await self.update_mvrv()
+            await self.update_3w_high()  # 3주 최고가 초기값 설정
 
             # 기존 태스크들 시작
             asyncio.create_task(self.start_rsi_updates())
-            asyncio.create_task(self.start_dominance_updates())  # 1시간마다
-            asyncio.create_task(self.start_mvrv_updates())  # MVRV 업데이트 태스크 추가
+            asyncio.create_task(self.start_dominance_updates())
+            asyncio.create_task(self.start_mvrv_updates())
             asyncio.create_task(self.update_24h_changes())
+            asyncio.create_task(
+                self.start_3w_high_updates()
+            )  # 3주 최고가 업데이트 태스크 추가
             asyncio.create_task(self.connect_upbit())
             asyncio.create_task(self.connect_binance())
 
