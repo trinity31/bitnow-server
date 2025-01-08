@@ -185,12 +185,6 @@ class AlertService:
             logger.error(f"RSI 알림 체크 중 오류 발생: {str(e)}")
             logger.exception(e)
 
-    async def check_premium_alert(self, alert: Alert, current_premium: float) -> bool:
-        """김치프리미엄 알림 조건 체크"""
-        if alert.direction == "above":
-            return current_premium > alert.threshold
-        return current_premium < alert.threshold
-
     async def refresh_cache(self, session: AsyncSession):
         """주기적으로 DB에서 알림 조건 새로고침"""
         try:
@@ -231,6 +225,12 @@ class AlertService:
                 elif alert.type == "kimchi_premium":
                     self.alert_cache["kimchi_premium"].append(alert)
                     logger.debug(f"Added kimchi premium alert: {alert.id}")
+                elif alert.type == "dominance":
+                    self.alert_cache["dominance"].append(alert)
+                    logger.debug(f"Added dominance alert: {alert.id}")
+                elif alert.type == "mvrv":
+                    self.alert_cache["mvrv"].append(alert)
+                    logger.debug(f"Added MVRV alert: {alert.id}")
 
             self.last_cache_update = current_time
             logger.debug(f"Cache refresh completed with {len(alerts)} total alerts")
