@@ -77,7 +77,7 @@ class IndicatorService:
             elif current_rsi <= 30:
                 signal = "oversold"
 
-            logger.info(f"RSI 계산 완료: {interval} = {round(float(current_rsi), 2)}")
+            logger.debug(f"RSI 계산 완료: {interval} = {round(float(current_rsi), 2)}")
             return {"rsi": round(float(current_rsi), 2), "signal": signal}
 
         except Exception as e:

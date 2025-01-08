@@ -110,11 +110,80 @@ class AlertService:
             )
         return alerts
 
-    async def check_rsi_alert(self, alert: Alert, current_rsi: float) -> bool:
-        """RSI 알림 조건 체크"""
-        if alert.direction == "above":
-            return current_rsi > alert.threshold
-        return current_rsi < alert.threshold
+    async def get_active_rsi_alerts(self, session: AsyncSession) -> List[Alert]:
+        """활성화된 RSI 알림 조건만 조회"""
+        query = (
+            select(Alert)
+            .where(Alert.is_active == True)
+            .where(Alert.type == "rsi")
+            .join(Alert.user)
+        )
+        result = await session.execute(query)
+        alerts = result.scalars().all()
+        logger.debug(f"Found {len(alerts)} active RSI alerts in database")
+        return alerts
+
+    async def check_rsi_alerts(
+        self, session: AsyncSession, market_data: Dict[str, Any]
+    ):
+        """RSI 알림 체크"""
+        try:
+            logger.debug("RSI 알림 조건 체크 시작")
+            logger.debug(f"현재 RSI 데이터: {market_data['rsi']}")
+
+            # RSI 알림만 조회하도록 수정
+            active_alerts = await self.get_active_rsi_alerts(session)
+            logger.debug(f"활성화된 RSI 알림 개수: {len(active_alerts)}")
+
+            for alert in active_alerts:
+                # interval이 None이거나 유효하지 않은 경우 스킵
+                if not alert.interval or alert.interval not in [
+                    "15m",
+                    "1h",
+                    "4h",
+                    "1d",
+                ]:
+                    logger.warning(
+                        f"유효하지 않은 interval - ID: {alert.id}, "
+                        f"Interval: {alert.interval}"
+                    )
+                    continue
+
+                current_rsi = market_data["rsi"].get(alert.interval)
+                if current_rsi is None:
+                    logger.warning(f"RSI 데이터 없음 - 간격: {alert.interval}")
+                    continue
+
+                logger.debug(
+                    f"알림 정보: ID={alert.id}, 간격={alert.interval}, "
+                    f"설정값={alert.threshold}, 현재값={current_rsi}, 방향={alert.direction}"
+                )
+
+                if self._check_threshold_condition(
+                    current_rsi, alert.threshold, alert.direction
+                ):
+                    logger.info(f"알림 조건 충족! ID: {alert.id}")
+                    await self.trigger_alert(
+                        session,
+                        alert,
+                        {
+                            "type": "RSI",
+                            "interval": alert.interval,
+                            "value": current_rsi,
+                            "threshold": alert.threshold,
+                            "direction": alert.direction,
+                        },
+                    )
+                else:
+                    logger.debug(
+                        f"알림 조건 미충족 - ID: {alert.id}, "
+                        f"현재값: {current_rsi}, 설정값: {alert.threshold}, "
+                        f"방향: {alert.direction}"
+                    )
+
+        except Exception as e:
+            logger.error(f"RSI 알림 체크 중 오류 발생: {str(e)}")
+            logger.exception(e)
 
     async def check_premium_alert(self, alert: Alert, current_premium: float) -> bool:
         """김치프리미엄 알림 조건 체크"""
@@ -325,79 +394,6 @@ class AlertService:
 
             # 마지막에 currency별 가격을 갱신
             self.last_price_by_currency[currency] = new_price
-
-    async def check_rsi_alerts(
-        self, session: AsyncSession, market_data: Dict[str, Any]
-    ):
-        """RSI 알림 체건 체크"""
-        try:
-            logger.info("RSI 알림 조건 체크 시작")
-            logger.info(f"현재 RSI 데이터: {market_data['rsi']}")
-
-            active_alerts = await self.get_active_alerts(session)
-            logger.info(f"활성화된 알림 개수: {len(active_alerts)}")
-
-            for alert in active_alerts:
-                # 알림 상세 정보 로깅
-                logger.info(
-                    f"알림 상세 정보 - ID: {alert.id}, "
-                    f"Type: {alert.type}, "
-                    f"Interval: {alert.interval}, "
-                    f"Threshold: {alert.threshold}, "
-                    f"Direction: {alert.direction}"
-                )
-
-                if alert.type.upper() != "RSI":
-                    logger.info(f"RSI 알림이 아님 - ID: {alert.id}, Type: {alert.type}")
-                    continue
-
-                # interval이 None이거나 유효하지 않은 경우 스킵
-                if not alert.interval or alert.interval not in [
-                    "15m",
-                    "1h",
-                    "4h",
-                    "1d",
-                ]:
-                    logger.warning(
-                        f"유효하지 않은 interval - ID: {alert.id}, "
-                        f"Interval: {alert.interval}"
-                    )
-                    continue
-
-                current_rsi = market_data["rsi"].get(alert.interval)
-                if current_rsi is None:
-                    logger.warning(f"RSI 데이터 없음 - 간격: {alert.interval}")
-                    continue
-
-                logger.info(
-                    f"- 알림 정보: ID={alert.id}, 간격={alert.interval}, "
-                    f"설정값={alert.threshold}, 현재값={current_rsi}, 방향={alert.direction}"
-                )
-
-                if self._check_threshold_condition(
-                    current_rsi, alert.threshold, alert.direction
-                ):
-                    logger.info(f"알림 조건 충족! ID: {alert.id}")
-                    await self.trigger_alert(
-                        session,
-                        alert,
-                        {
-                            "type": "RSI",
-                            "interval": alert.interval,
-                            "value": current_rsi,
-                            "threshold": alert.threshold,
-                            "direction": alert.direction,
-                        },
-                    )
-                else:
-                    logger.info(
-                        f"알림 조건 미충족 - ID: {alert.id}, "
-                        f"현재값: {current_rsi}, 설정값: {alert.threshold}, 방향: {alert.direction}"
-                    )
-
-        except Exception as e:
-            logger.error(f"RSI 알림 체크 중 오류 발생: {str(e)}")
-            logger.exception(e)
 
     def _check_threshold_condition(
         self, current_value: float, threshold: float, direction: str

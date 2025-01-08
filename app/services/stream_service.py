@@ -169,21 +169,27 @@ class PriceStreamService:
     async def broadcast(self, message: Dict[str, Any]):
         """연결된 모든 클라이언트에게 메시지 전송"""
         if self.clients:
-            # DB 세션 생성
-            async with async_session() as session:
-                # 알림 조건 체크
-                await alert_service.process_market_data(session, message)
+
+            async def check_alerts():
+                # DB 세션 생성
+                async with async_session() as session:
+                    # 알림 조건 체크
+                    await alert_service.process_market_data(session, message)
 
             # 기존 브로드캐스트 로직
-            disconnected_clients = set()
-            message_str = json.dumps(message)
-            for client in self.clients:
-                try:
-                    await client.send_text(message_str)
-                except Exception as e:
-                    logger.error(f"Failed to send message to client: {str(e)}")
-                    disconnected_clients.add(client)
-            self.clients -= disconnected_clients
+            async def send_messages():
+                disconnected_clients = set()
+                message_str = json.dumps(message)
+                for client in self.clients:
+                    try:
+                        await client.send_text(message_str)
+                    except Exception as e:
+                        logger.error(f"Failed to send message to client: {str(e)}")
+                        disconnected_clients.add(client)
+                self.clients -= disconnected_clients
+
+            # 두 작업을 동시에 실행
+            await asyncio.gather(check_alerts(), send_messages())
 
     async def add_client(self, websocket: websockets.WebSocketServerProtocol):
         """새로운 클라이언트 연결 추가"""
@@ -206,7 +212,7 @@ class PriceStreamService:
         try:
             rsi_data = await indicator_service.calculate_rsi("BTC", interval, 14)
             self.current_prices["rsi"][interval] = round(float(rsi_data["rsi"]), 2)
-            logger.info(
+            logger.debug(
                 f"Updated RSI for interval {interval}: {self.current_prices['rsi'][interval]}"
             )
 
@@ -234,36 +240,6 @@ class PriceStreamService:
                 logger.error(f"RSI 업데이트 중 오류 발생: {str(e)}")
                 await asyncio.sleep(10)  # 오류 발생시 10초 대기
 
-    async def start_hourly_rsi_updates(self):
-        """1시간 RSI 업데이트"""
-        while self.running:
-            try:
-                await self.update_rsi("1h")
-                await asyncio.sleep(60 * 60)  # 1시간 대기
-            except Exception as e:
-                logger.error(f"Error in 1h RSI update: {str(e)}")
-                await asyncio.sleep(60)
-
-    async def start_4h_rsi_updates(self):
-        """4시간 RSI 업데이트"""
-        while self.running:
-            try:
-                await self.update_rsi("4h")
-                await asyncio.sleep(4 * 60 * 60)  # 4시간 대기
-            except Exception as e:
-                logger.error(f"Error in 4h RSI update: {str(e)}")
-                await asyncio.sleep(60)
-
-    async def start_daily_rsi_updates(self):
-        """일간 RSI 업데이트"""
-        while self.running:
-            try:
-                await self.update_rsi("1d")
-                await asyncio.sleep(24 * 60 * 60)  # 24시간 대기
-            except Exception as e:
-                logger.error(f"Error in daily RSI update: {str(e)}")
-                await asyncio.sleep(60)
-
     async def update_dominance(self):
         """도미넌스 업데이트"""
         try:
@@ -274,11 +250,11 @@ class PriceStreamService:
             logger.error(f"Failed to update Dominance: {str(e)}")
 
     async def start_dominance_updates(self):
-        """도미넌스 주기적 업데이트 (1분마다)"""
+        """도미넌스 주기적 업데이트 (60분마다)"""
         while self.running:
             try:
                 await self.update_dominance()
-                await asyncio.sleep(60)  # 1분 대기
+                await asyncio.sleep(60 * 60)  # 60분 대기
             except Exception as e:
                 logger.error(f"Error in Dominance update: {str(e)}")
                 await asyncio.sleep(60)
@@ -295,11 +271,11 @@ class PriceStreamService:
             logger.error(f"Failed to update MVRV: {str(e)}")
 
     async def start_mvrv_updates(self):
-        """MVRV 주기적 업데이트 (1분마다)"""
+        """MVRV 주기적 업데이트 (60분마다)"""
         while self.running:
             try:
                 await self.update_mvrv()
-                await asyncio.sleep(60)  # 1분 대기
+                await asyncio.sleep(60 * 60)  # 60분 대기
             except Exception as e:
                 logger.error(f"Error in MVRV update: {str(e)}")
                 await asyncio.sleep(60)
