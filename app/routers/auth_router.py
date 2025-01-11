@@ -146,13 +146,20 @@ async def login_json(
 
 
 @router.post("/auth/logout", tags=["auth"])
-async def logout(current_user: User = Depends(get_current_user)):
-    """사용자 로그아웃
+async def logout(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    try:
+        # 사용자의 FCM 토큰을 null로 설정
+        current_user.fcm_token = None
+        await session.commit()
 
-    클라이언트는 저장된 토큰을 삭제해야 합니다.
-    서버 측에서는 JWT를 사용하므로 별도의 세션 관리가 필요 없습니다.
-    """
-    return {"message": "Successfully logged out"}
+        return {"message": "Successfully logged out"}
+    except Exception as e:
+        logger.error(f"Logout failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Logout failed")
+
 
 
 @router.delete("/auth/me", tags=["auth"])
