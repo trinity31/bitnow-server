@@ -471,10 +471,22 @@ class AlertService:
                         title="BitNow 알림",
                         body=message,
                     )
-                    if response:
-                        logger.info(f"FCM notification sent successfully: {message}")
-                    else:
+
+                    # FCM 응답 처리 추가
+                    if not response:
                         logger.error("FCM notification failed to send")
+                        # 토큰이 유효하지 않은 경우
+                        if "InvalidRegistration" in str(
+                            response
+                        ) or "NotRegistered" in str(response):
+                            logger.info(
+                                f"Removing invalid FCM token for user {alert_with_user.user.id}"
+                            )
+                            # 사용자의 FCM 토큰 제거
+                            alert_with_user.user.fcm_token = None
+                            await session.commit()
+                    else:
+                        logger.info(f"FCM notification sent successfully: {message}")
                 else:
                     logger.warning(
                         f"User has no FCM token for alert ID: {alert_with_user.id}"
