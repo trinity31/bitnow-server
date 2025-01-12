@@ -12,6 +12,9 @@ import aiohttp
 import asyncio  # 락 사용을 위해 필요
 from app.constants import BATCH_CREATE_THRESHOLD
 import time
+from sqlalchemy.orm import Session
+from app.services.credit_service import CreditService
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -443,6 +446,13 @@ class AlertService:
                 select_result = await session.execute(stmt)
                 alert_with_user = select_result.unique().scalar_one()
 
+                # 크레딧 차감 시도
+                try:
+                    await CreditService.deduct_credit(session, alert_with_user.user_id)
+                except HTTPException as e:
+                    logger.error(f"크레딧 차감 실패: {str(e)}")
+                    return  # 크레딧이 부족하면 알림을 보내지 않음
+
                 # 알림 비활성화
                 update_stmt = (
                     update(Alert)
@@ -472,17 +482,15 @@ class AlertService:
                         body=message,
                     )
 
-                    # FCM 응답 처리 추가
+                    # FCM 응답 처리
                     if not response:
                         logger.error("FCM notification failed to send")
-                        # 토큰이 유효하지 않은 경우
                         if "InvalidRegistration" in str(
                             response
                         ) or "NotRegistered" in str(response):
                             logger.info(
                                 f"Removing invalid FCM token for user {alert_with_user.user.id}"
                             )
-                            # 사용자의 FCM 토큰 제거
                             alert_with_user.user.fcm_token = None
                             await session.commit()
                     else:
@@ -491,9 +499,11 @@ class AlertService:
                     logger.warning(
                         f"User has no FCM token for alert ID: {alert_with_user.id}"
                     )
+
             except Exception as e:
                 logger.error(f"Failed to trigger alert: {str(e)}")
                 logger.exception(e)
+                await session.rollback()
 
     def create_alert_message(
         self, alert: Alert, additional_data: Dict[str, Any] = None
@@ -578,7 +588,6 @@ class AlertService:
         alerts = result.scalars().all()
         logger.debug(f"Found {len(alerts)} total alerts in database")
         return alerts
-
 
 # 싱글톤 인스턴스 생성
 alert_service = AlertService()

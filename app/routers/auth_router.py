@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
-from app.models import User, ErrorResponse
+from app.models import User, ErrorResponse, Credit
 from app.utils.auth import (
     verify_password,
     create_access_token,
@@ -17,6 +17,8 @@ from fastapi.exceptions import RequestValidationError
 import os
 from dotenv import load_dotenv
 import logging
+from sqlalchemy.exc import IntegrityError
+from app.constants import INITIAL_CREDIT_AMOUNT
 
 load_dotenv()
 
@@ -52,6 +54,12 @@ async def register(user_data: UserCreate, session: AsyncSession = Depends(get_se
             fcm_token=user_data.fcm_token,
         )
         session.add(user)
+        await session.commit()
+        await session.refresh(user)
+
+        # 초기 크레딧 생성
+        initial_credit = Credit(user_id=user.id, amount=INITIAL_CREDIT_AMOUNT)
+        session.add(initial_credit)
         await session.commit()
 
         return {"message": "User created successfully"}
@@ -159,7 +167,6 @@ async def logout(
     except Exception as e:
         logger.error(f"Logout failed: {str(e)}")
         raise HTTPException(status_code=500, detail="Logout failed")
-
 
 
 @router.delete("/auth/me", tags=["auth"])

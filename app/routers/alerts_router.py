@@ -9,6 +9,7 @@ from app.models import User, Alert
 from sqlalchemy import select
 import logging
 from datetime import datetime
+from app.services.credit_service import CreditService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -41,10 +42,20 @@ async def create_alert_condition(
                 },
             )
 
+        # 크레딧 차감 시도
+        try:
+            await CreditService.deduct_credit(session, current_user.id)
+        except HTTPException as e:
+            raise HTTPException(
+                status_code=400, detail="크레딧이 부족하여 알림을 설정할 수 없습니다"
+            )
+
+        # 알림 생성
         alert = await alert_service.create_alert(
             session, current_user.id, alert_data.dict()
         )
         return alert
+
     except HTTPException:
         raise
     except Exception as e:

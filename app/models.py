@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from datetime import datetime
 from .database import Base
 from pydantic import BaseModel
@@ -17,6 +18,9 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     alerts = relationship("Alert", back_populates="user", cascade="all, delete-orphan")
+    credits = relationship(
+        "Credit", back_populates="user", uselist=False
+    )  # one-to-one relationship
 
 
 class Alert(Base):
@@ -49,3 +53,27 @@ class MVRVIndicator(Base):
     id = Column(Integer, primary_key=True)
     value = Column(Float, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Credit(Base):
+    __tablename__ = "credits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    amount = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    user = relationship("User", back_populates="credits")  # back reference to User
+
+
+class CreditHistory(Base):
+    __tablename__ = "credit_histories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    amount = Column(Integer)
+    type = Column(String)  # "EARN" 또는 "USE"
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    user = relationship("User")

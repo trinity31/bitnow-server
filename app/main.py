@@ -3,7 +3,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from app.routers import prices, indicator_router, ws_router, auth_router, alerts_router
+from app.routers import (
+    prices,
+    indicator_router,
+    ws_router,
+    auth_router,
+    alerts_router,
+    credit_router,
+)
 from app.services.stream_service import stream_service
 from app.services.push_service import push_service
 import asyncio
@@ -56,6 +63,7 @@ app.include_router(
     alerts_router.router,
     tags=["alerts"],
 )
+app.include_router(credit_router.router)
 
 
 @app.on_event("startup")
@@ -80,6 +88,11 @@ async def shutdown_event():
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # 초기 크레딧 생성
+    from app.migrations.create_initial_credits import create_initial_credits
+
+    await create_initial_credits()
 
 
 @app.exception_handler(RequestValidationError)
