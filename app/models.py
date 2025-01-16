@@ -14,6 +14,7 @@ class User(Base):
     password = Column(String)  # 해시된 비밀번호
     fcm_token = Column(String, nullable=True)
     is_admin = Column(Boolean, default=False)  # 관리자 여부
+    locale = Column(String(10), nullable=True)  # 사용자 언어 설정
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
