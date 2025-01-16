@@ -46,8 +46,11 @@ class PushService:
                 android=messaging.AndroidConfig(
                     notification=messaging.AndroidNotification(
                         channel_id="default_channel_id",
-                        sound="default",  # Android에서도 알림음을 설정하려면 추가
+                        sound="default",  # Android 알림음
                     )
+                ),
+                apns=messaging.APNSConfig(  # iOS 알림음 설정 추가
+                    payload=messaging.APNSPayload(aps=messaging.Aps(sound="default"))
                 ),
                 data={
                     "click_action": "FLUTTER_NOTIFICATION_CLICK",
