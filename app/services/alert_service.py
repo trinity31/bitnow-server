@@ -446,13 +446,6 @@ class AlertService:
                 select_result = await session.execute(stmt)
                 alert_with_user = select_result.unique().scalar_one()
 
-                # 크레딧 차감 시도
-                try:
-                    await CreditService.deduct_credit(session, alert_with_user.user_id)
-                except HTTPException as e:
-                    logger.error(f"크레딧 차감 실패: {str(e)}")
-                    return  # 크레딧이 부족하면 알림을 보내지 않음
-
                 # 알림 비활성화
                 update_stmt = (
                     update(Alert)
@@ -588,6 +581,7 @@ class AlertService:
         alerts = result.scalars().all()
         logger.debug(f"Found {len(alerts)} total alerts in database")
         return alerts
+
 
 # 싱글톤 인스턴스 생성
 alert_service = AlertService()
