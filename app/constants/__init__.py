@@ -1,3 +1,4 @@
+# 비어있어도 됩니다
 import os
 from dotenv import load_dotenv
 
@@ -54,5 +55,5 @@ BATCH_CREATE_THRESHOLD = 1
 
 # 크레딧 관련 상수
 INITIAL_CREDIT_AMOUNT = 10  # 신규 사용자 초기 크레딧
-CREDIT_PER_AD_VIEW = 1  # 광고 시청당 적립 크레딧
+CREDIT_PER_AD_VIEW = 10  # 광고 시청당 적립 크레딧
 MIN_CREDIT_FOR_ALERT = 1  # 알림 발송에 필요한 최소 크레딧
