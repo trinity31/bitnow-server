@@ -10,6 +10,7 @@ from sqlalchemy import select
 import logging
 from datetime import datetime
 from app.services.credit_service import CreditService
+from app.constants.messages import ERROR_MESSAGES
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -32,22 +33,68 @@ async def create_alert_condition(
 ):
     """알림 조건 생성"""
     try:
+        locale = current_user.locale or "en"
+        messages = ERROR_MESSAGES.get(locale, ERROR_MESSAGES["en"])
+
         # 통화 검증
         if alert_data.type == "price" and alert_data.currency not in ["KRW", "USD"]:
             raise HTTPException(
                 status_code=400,
                 detail={
                     "code": "INVALID_CURRENCY",
-                    "message": "통화는 KRW 또는 USD만 가능합니다",
+                    "message": messages["INVALID_CURRENCY"],
                 },
             )
+
+        # 동일한 조건의 알림이 있는지 확인 (비활성화된 알림 포함)
+        query = select(Alert).where(
+            Alert.user_id == current_user.id,
+            Alert.type == alert_data.type,
+            Alert.symbol == alert_data.symbol,
+            Alert.threshold == alert_data.threshold,
+            Alert.direction == alert_data.direction,
+        )
+
+        if alert_data.type == "price":
+            query = query.where(Alert.currency == alert_data.currency)
+        if alert_data.type == "rsi":
+            query = query.where(Alert.interval == alert_data.interval)
+
+        result = await session.execute(query)
+        existing_alert = result.scalar_one_or_none()
+
+        if existing_alert:
+            # 비활성화된 알림이 있는 경우 재활성화 안내
+            if not existing_alert.is_active:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "INACTIVE_ALERT_EXISTS",
+                        "message": messages["INACTIVE_ALERT_EXISTS"],
+                        "alert_id": existing_alert.id,
+                    },
+                )
+            # 활성화된 알림이 있는 경우
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "DUPLICATE_ALERT",
+                        "message": messages["DUPLICATE_ALERT"],
+                        "alert_id": existing_alert.id,
+                    },
+                )
 
         # 크레딧 차감 시도
         try:
             await CreditService.deduct_credit(session, current_user.id)
         except HTTPException as e:
             raise HTTPException(
-                status_code=400, detail="크레딧이 부족하여 알림을 설정할 수 없습니다"
+                status_code=400,
+                detail={
+                    "code": "CREATE_FAILED",
+                    "message": "크레딧이 부족하여 알림을 설정할 수 없습니다",
+                },
             )
 
         # 알림 생성
@@ -59,11 +106,12 @@ async def create_alert_condition(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to create alert: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail={
                 "code": "CREATE_FAILED",
-                "message": "알림 조건 생성에 실패했습니다",
+                "message": messages["CREATE_FAILED"],
             },
         )
 
