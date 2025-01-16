@@ -15,6 +15,7 @@ import time
 from sqlalchemy.orm import Session
 from app.services.credit_service import CreditService
 from fastapi import HTTPException
+from app.constants.messages import ALERT_MESSAGES
 
 logger = logging.getLogger(__name__)
 
@@ -466,12 +467,14 @@ class AlertService:
                 # 푸시 알림 전송
                 message = self.create_alert_message(alert_with_user, additional_data)
                 if alert_with_user.user and alert_with_user.user.fcm_token:
-                    logger.info(
-                        f"Attempting to send notification to token: {alert_with_user.user.fcm_token[:10]}..."
-                    )
+                    locale = alert_with_user.user.locale or "en"
+                    title = ALERT_MESSAGES.get(locale, ALERT_MESSAGES["en"])[
+                        "alert_title"
+                    ]
+
                     response = await push_service.send_push_notification(
                         token=alert_with_user.user.fcm_token,
-                        title="BitNow 알림",
+                        title=title,
                         body=message,
                     )
 
@@ -502,39 +505,61 @@ class AlertService:
         self, alert: Alert, additional_data: Dict[str, Any] = None
     ) -> str:
         """알림 메시지 생성"""
-        if alert.type == "rsi" and additional_data:
-            direction_text = (
-                "상향 돌파!" if alert.direction == "above" else "하향 돌파!"
-            )
-            message = (
-                f"{alert.symbol} {alert.interval} RSI "
-                f"{alert.threshold} {direction_text}"
-            )
-        elif alert.type == "price":
-            direction_text = (
-                "상향 돌파!" if alert.direction == "above" else "하향 돌파!"
-            )
-            currency = alert.currency or "KRW"
-            price = (
-                f"{alert.threshold:,.0f}"
-                if currency == "KRW"
-                else f"${alert.threshold:,.0f}"
-            )
-            message = f"{alert.symbol} {price} {direction_text}"
-        elif alert.type == "kimchi_premium":
-            direction_text = "이상!" if alert.direction == "above" else "이하!"
-            message = f"{alert.symbol} 김치프리미엄 {alert.threshold}% {direction_text}"
-        elif alert.type == "dominance":
-            direction_text = "이상!" if alert.direction == "above" else "이하!"
-            message = f"{alert.symbol} 도미넌스 {alert.threshold}% {direction_text}"
-        elif alert.type == "mvrv":
-            direction_text = "이상!" if alert.direction == "above" else "이하!"
-            message = f"{alert.symbol} MVRV {alert.threshold} {direction_text}"
+        locale = alert.user.locale if alert.user and alert.user.locale else "en"
+        messages = ALERT_MESSAGES.get(locale, ALERT_MESSAGES["en"])
+
+        if alert.type == "mvrv":
+            if locale == "ko":
+                message = f"{alert.symbol}의 MVRV가 {alert.threshold}{messages['over'] if alert.direction == 'above' else messages['under']}"
+            else:
+                message = f"{alert.symbol} MVRV{messages['over'] if alert.direction == 'above' else messages['under']}{alert.threshold}"
         else:
             direction_text = (
-                "상향 돌파!" if alert.direction == "above" else "하향 돌파!"
+                messages["above"] if alert.direction == "above" else messages["below"]
             )
-            message = f"{alert.symbol} {alert.type} {alert.threshold} {direction_text}"
+            if alert.type == "rsi" and additional_data:
+                message = (
+                    f"{alert.symbol} {alert.interval} RSI "
+                    f"{alert.threshold} {direction_text}"
+                )
+            elif alert.type == "price":
+                direction_text = (
+                    messages["above"]
+                    if alert.direction == "above"
+                    else messages["below"]
+                )
+                currency = alert.currency or "KRW"
+                price = (
+                    f"{alert.threshold:,.0f}"
+                    if currency == "KRW"
+                    else f"${alert.threshold:,.0f}"
+                )
+                message = f"{alert.symbol} {price} {direction_text}"
+            elif alert.type == "kimchi_premium":
+                direction_text = (
+                    messages["over"]
+                    if alert.direction == "above"
+                    else messages["under"]
+                )
+                message = (
+                    f"{alert.symbol} 김치프리미엄 {alert.threshold}% {direction_text}"
+                )
+            elif alert.type == "dominance":
+                direction_text = (
+                    messages["over"]
+                    if alert.direction == "above"
+                    else messages["under"]
+                )
+                message = f"{alert.symbol} 도미넌스 {alert.threshold}% {direction_text}"
+            else:
+                direction_text = (
+                    messages["above"]
+                    if alert.direction == "above"
+                    else messages["below"]
+                )
+                message = (
+                    f"{alert.symbol} {alert.type} {alert.threshold} {direction_text}"
+                )
 
         return message
 
