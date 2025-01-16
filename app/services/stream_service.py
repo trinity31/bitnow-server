@@ -94,17 +94,17 @@ class PriceStreamService:
                         self.current_prices["krw"] = float(data["trade_price"])
                         self.current_prices["timestamp"] = datetime.now().isoformat()
 
-                        # 브로드캐스트 주기 제한
-                        if await self.should_broadcast():
-                            # 브로드캐스트 시점에 김치프리미엄 계산
-                            if self.current_prices["usd"] > 0:
-                                self.current_prices["kimchi_premium"] = (
-                                    await self.calculate_kimchi_premium(
-                                        self.current_prices["krw"],
-                                        self.current_prices["usd"],
-                                    )
+                        # 브로드캐스트 주기와 관계없이 항상 알림 체크
+                        if self.current_prices["usd"] > 0:
+                            self.current_prices["kimchi_premium"] = (
+                                await self.calculate_kimchi_premium(
+                                    self.current_prices["krw"],
+                                    self.current_prices["usd"],
                                 )
-                            await self.broadcast(self.current_prices)
+                            )
+
+                        # 알림 체크는 항상 실행
+                        await self.broadcast(self.current_prices)
 
             except Exception as e:
                 logger.error(f"Upbit WebSocket error: {str(e)}")
@@ -155,34 +155,38 @@ class PriceStreamService:
                         self.current_prices["usd"] = float(data["p"])
                         self.current_prices["timestamp"] = datetime.now().isoformat()
 
-                        # 브로드캐스트 주기 제한
-                        if await self.should_broadcast():
-                            # 브로드캐스트 시점에 김치프리미엄 계산
-                            if self.current_prices["krw"] > 0:
-                                self.current_prices["kimchi_premium"] = (
-                                    await self.calculate_kimchi_premium(
-                                        self.current_prices["krw"],
-                                        self.current_prices["usd"],
-                                    )
+                        # 브로드캐스트 주기와 관계없이 항상 알림 체크
+                        if self.current_prices["krw"] > 0:
+                            self.current_prices["kimchi_premium"] = (
+                                await self.calculate_kimchi_premium(
+                                    self.current_prices["krw"],
+                                    self.current_prices["usd"],
                                 )
-                            await self.broadcast(self.current_prices)
+                            )
+
+                        # 알림 체크는 항상 실행
+                        await self.broadcast(self.current_prices)
 
             except Exception as e:
                 logger.error(f"Binance WebSocket error: {str(e)}")
                 await asyncio.sleep(RECONNECT_DELAY)
 
     async def broadcast(self, message: Dict[str, Any]):
-        """연결된 모든 클라이언트에게 메시지 전송"""
+        """연결된 모든 클라이언트에게 메시지 전송 및 알림 체크"""
+        # 알림 체크는 클라이언트 연결 여부와 관계없이 항상 실행
+        try:
+            async with async_session() as session:
+                await alert_service.process_market_data(session, message)
+        except Exception as e:
+            logger.error(f"Error checking alerts: {str(e)}")
+            logger.exception(e)
+
+        # 클라이언트가 있을 때만 메시지 전송 (1초 주기 제한)
         if self.clients:
-
-            async def check_alerts():
-                # DB 세션 생성
-                async with async_session() as session:
-                    # 알림 조건 체크
-                    await alert_service.process_market_data(session, message)
-
-            # 기존 브로드캐스트 로직
-            async def send_messages():
+            now = datetime.now()
+            if (
+                now - self.last_broadcast_time
+            ).total_seconds() >= self.broadcast_interval:
                 disconnected_clients = set()
                 message_str = json.dumps(message)
                 for client in self.clients:
@@ -192,9 +196,7 @@ class PriceStreamService:
                         logger.error(f"Failed to send message to client: {str(e)}")
                         disconnected_clients.add(client)
                 self.clients -= disconnected_clients
-
-            # 두 작업을 동시에 실행
-            await asyncio.gather(check_alerts(), send_messages())
+                self.last_broadcast_time = now
 
     async def add_client(self, websocket: websockets.WebSocketServerProtocol):
         """새로운 클라이언트 연결 추가"""
