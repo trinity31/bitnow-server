@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.exceptions import RequestValidationError
@@ -17,14 +17,28 @@ import asyncio
 import logging
 from app.database import engine
 from app.models import Base
+from contextlib import asynccontextmanager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    asyncio.create_task(stream_service.start())
+    yield
+    # Shutdown
+    await stream_service.stop()
+
 
 app = FastAPI(
     title="BitNow API",
     description="실시간 암호화폐 가격 및 기술적 지표 제공 API",
     version="1.0.0",
+    lifespan=lifespan,
     # OpenAPI에 보안 스키마 추가
     openapi_tags=[
         {"name": "auth", "description": "인증 관련 API"},
@@ -101,6 +115,12 @@ async def validation_exception_handler(request, exc):
         status_code=400,
         content={"code": "INVALID_INPUT", "message": "잘못된 입력입니다"},
     )
+
+
+@app.get("/health")
+async def health_check():
+    """서비스 헬스 체크 엔드포인트"""
+    return {"status": "OK"}
 
 
 if __name__ == "__main__":
