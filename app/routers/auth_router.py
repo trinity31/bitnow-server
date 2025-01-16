@@ -33,6 +33,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     fcm_token: Optional[str] = None
+    locale: Optional[str] = Field(None, max_length=10)
 
 
 @router.post("/auth/register", tags=["auth"])
@@ -52,6 +53,7 @@ async def register(user_data: UserCreate, session: AsyncSession = Depends(get_se
             email=user_data.email,
             password=hashed_password,
             fcm_token=user_data.fcm_token,
+            locale=user_data.locale,
         )
         session.add(user)
         await session.commit()
@@ -70,6 +72,7 @@ async def register(user_data: UserCreate, session: AsyncSession = Depends(get_se
             content={"code": "INVALID_INPUT", "message": "잘못된 입력입니다"},
         )
     except Exception as e:
+        logger.error(f"User registration failed: {str(e)}")
         return JSONResponse(
             status_code=500,
             content={"code": "SERVER_ERROR", "message": "서버 오류가 발생했습니다"},
@@ -186,6 +189,7 @@ async def delete_user(
 
 class FCMTokenUpdate(BaseModel):
     fcm_token: str
+    locale: Optional[str] = Field(None, max_length=10)
 
 
 @router.put("/auth/fcm-token", tags=["auth"])
@@ -194,12 +198,15 @@ async def update_fcm_token(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """FCM 토큰 업데이트"""
+    """FCM 토큰과 locale 업데이트"""
     try:
         current_user.fcm_token = token_data.fcm_token
+        if token_data.locale:
+            current_user.locale = token_data.locale
         await session.commit()
-        return {"message": "FCM token updated successfully"}
+        return {"message": "FCM token and locale updated successfully"}
     except Exception as e:
+        logger.error(f"FCM token update failed: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail={
