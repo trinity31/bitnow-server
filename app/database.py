@@ -7,7 +7,9 @@ import logging
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./bitnow.db")
+# 환경 변수로 프로덕션 모드 확인
+IS_PRODUCTION = os.getenv("ENVIRONMENT", "dev") == "prod"
+DATABASE_URL = os.getenv("PROD_DATABASE_URL" if IS_PRODUCTION else "DATABASE_URL")
 
 # SQLAlchemy 로거 비활성화
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)

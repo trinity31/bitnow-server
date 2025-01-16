@@ -150,6 +150,23 @@ websocat ws://localhost:8000/ws/price
 black app/
 ```
 
+## 프로덕션 배포 가이드
+
+### PostgreSQL 데이터베이스 설정
+1. AWS RDS에서 PostgreSQL 인스턴스 생성
+   - 엔진: PostgreSQL 13 이상
+   - 인스턴스 클래스: db.t3.micro (프리티어)
+   - 스토리지: 20GB
+   - 다중 AZ: 비활성화 (프리티어)
+
+2. 보안 그룹 설정
+   - EC2의 보안 그룹에서 RDS로의 접근 허용 (포트 5432)
+
+3. 데이터베이스 생성
+
+
+
 ## 라이센스
 
 MIT License
+
