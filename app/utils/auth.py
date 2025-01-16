@@ -32,11 +32,12 @@ def create_access_token(data: dict):
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme), session: AsyncSession = Depends(get_session)
+    token: str = Depends(oauth2_scheme),
+    session: AsyncSession = Depends(get_session),
 ) -> User:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: int = payload.get("sub")
+        user_id = int(payload.get("sub"))
         if user_id is None:
             raise HTTPException(
                 status_code=401,
