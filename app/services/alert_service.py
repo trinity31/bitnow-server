@@ -212,7 +212,7 @@ class AlertService:
 
             # 활성화된 알림 조건 조회
             alerts = await self.get_active_alerts(session)
-            logger.info(f"Refreshing cache with {len(alerts)} active alerts")
+            logger.debug(f"Refreshing cache with {len(alerts)} active alerts")
 
             # 타입별로 분류하여 캐시에 저장
             for alert in alerts:
@@ -467,6 +467,9 @@ class AlertService:
                 # 푸시 알림 전송
                 message = self.create_alert_message(alert_with_user, additional_data)
                 if alert_with_user.user and alert_with_user.user.fcm_token:
+                    logger.info(
+                        f"Using FCM token: {alert_with_user.user.fcm_token[:10]}..."
+                    )  # 보안을 위해 일부만 출력
                     locale = alert_with_user.user.locale or "en"
                     title = ALERT_MESSAGES.get(locale, ALERT_MESSAGES["en"])[
                         "alert_title"
