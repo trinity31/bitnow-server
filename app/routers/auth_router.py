@@ -9,7 +9,7 @@ from app.utils.auth import (
     get_password_hash,
     get_current_user,
 )
-from sqlalchemy import select
+from sqlalchemy import select, func
 from pydantic import BaseModel, EmailStr, Field, ValidationError
 from typing import Optional, Dict, Any
 from fastapi.responses import JSONResponse
@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 import logging
 from sqlalchemy.exc import IntegrityError
 from app.constants import INITIAL_CREDIT_AMOUNT
+from app.services.slack_service import SlackService
 
 load_dotenv()
 
@@ -27,6 +28,8 @@ ADMIN_SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", "your-secret-key")
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+slack_service = SlackService()
 
 
 class UserCreate(BaseModel):
@@ -63,6 +66,15 @@ async def register(user_data: UserCreate, session: AsyncSession = Depends(get_se
         initial_credit = Credit(user_id=user.id, amount=INITIAL_CREDIT_AMOUNT)
         session.add(initial_credit)
         await session.commit()
+
+        # 전체 사용자 수 조회
+        result = await session.execute(select(func.count(User.id)))
+        total_users = result.scalar()
+
+        # 슬랙 메시지 전송
+        await slack_service.send_message(
+            f"새로운 회원이 가입했습니다. 현재 총 가입자는 {total_users}명 입니다."
+        )
 
         return {"message": "User created successfully"}
 
@@ -286,4 +298,34 @@ async def create_admin(
         logger.error(f"예상치 못한 오류: {str(e)}")
         raise HTTPException(
             status_code=500, detail=f"서버 오류가 발생했습니다: {str(e)}"
+        )
+
+
+@router.get("/users/emails", tags=["users"])
+async def get_user_emails(
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    모든 사용자의 이메일 목록을 반환합니다.
+    """
+    try:
+        # 모든 사용자의 이메일 조회
+        result = await session.execute(
+            select(User.email).order_by(User.created_at.desc())
+        )
+        emails = result.scalars().all()
+
+        return {
+            "total": len(emails),
+            "emails": emails,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get user emails: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "FETCH_FAILED",
+                "message": "사용자 목록 조회에 실패했습니다",
+            },
         )
