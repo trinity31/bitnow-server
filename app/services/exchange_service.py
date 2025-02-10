@@ -81,6 +81,8 @@ class ExchangeRateService:
         # 첫 번째 API 시도
         rate = await self._fetch_from_er_api()
 
+       # print(f"ExchangeRate-API 조회 결과: {rate}")
+
         # 실패하면 백업 API 시도
         if rate is None:
             rate = await self._fetch_from_alpha_vantage()

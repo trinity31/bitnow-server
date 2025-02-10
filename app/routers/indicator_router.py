@@ -11,6 +11,10 @@ import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from pydantic import BaseModel
+from app.services.price_service import check_ma_cross_all
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/indicator", tags=["indicators"])
 indicator_service = IndicatorService()
@@ -133,3 +137,22 @@ async def delete_mvrv(
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ma-cross", response_model=Dict[str, Any])
+async def get_ma_cross():
+    """
+    BTC/USDT의 20일, 60일, 120일, 200일 이동평균선 돌파 여부를 반환
+    """
+    try:
+        ma_data = await check_ma_cross_all()
+        return ma_data
+    except Exception as e:
+        logger.error(f"Failed to get MA cross data: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "MA_CROSS_FETCH_FAILED",
+                "message": "이동평균선 데이터 조회에 실패했습니다",
+            },
+        )

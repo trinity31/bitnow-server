@@ -610,6 +610,57 @@ class AlertService:
         logger.debug(f"Found {len(alerts)} total alerts in database")
         return alerts
 
+    async def check_ma_alerts(self, session: AsyncSession, ma_data: Dict[str, Any]):
+        """MA 크로스 알림 체크"""
+        try:
+            if "error" in ma_data:
+                return
+
+            # 이전 MA 결과 저장용 딕셔너리가 없다면 초기화
+            if not hasattr(self, "last_ma_results"):
+                self.last_ma_results = {}
+
+            # MA 결과 순회
+            for period, data in ma_data["ma_results"].items():
+                last_data = self.last_ma_results.get(period)
+                if last_data is None:
+                    # 첫 실행시에는 현재 상태만 저장
+                    self.last_ma_results[period] = data
+                    continue
+
+                # 방향 전환 체크
+                direction_changed_up = (
+                    not last_data["confirmed_up"] and data["confirmed_up"]
+                )
+                direction_changed_down = (
+                    not last_data["confirmed_down"] and data["confirmed_down"]
+                )
+
+                # 상향 전환 알림
+                if direction_changed_up:
+                    alerts = await self.get_alerts_by_type(
+                        session, "ma", f"ma{period}", "above"
+                    )
+                    for alert in alerts:
+                        if alert.is_active:
+                            await self.trigger_alert(session, alert)
+
+                # 하향 전환 알림
+                if direction_changed_down:
+                    alerts = await self.get_alerts_by_type(
+                        session, "ma", f"ma{period}", "below"
+                    )
+                    for alert in alerts:
+                        if alert.is_active:
+                            await self.trigger_alert(session, alert)
+
+                # 현재 상태 저장
+                self.last_ma_results[period] = data
+
+        except Exception as e:
+            logger.error(f"Error checking MA alerts: {str(e)}")
+            logger.exception(e)
+
 
 # 싱글톤 인스턴스 생성
 alert_service = AlertService()

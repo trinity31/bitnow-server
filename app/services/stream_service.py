@@ -16,6 +16,7 @@ from app.services.exchange_service import exchange_service  # 환율 서비스 i
 from app.services.indicator_service import indicator_service  # RSI 서비스 import
 from app.services.alert_service import alert_service
 from app.database import async_session  # 추가
+from app.services.price_service import check_ma_cross_all  # 상단에 추가
 
 # SQLAlchemy 로거 비활성화 추가
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
@@ -331,6 +332,29 @@ class PriceStreamService:
                 logger.error(f"3주 최고가 업데이트 태스크 오류: {str(e)}")
                 await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
 
+    async def update_ma_cross(self):
+        """이동평균선 돌파 여부 업데이트"""
+        try:
+            ma_data = await check_ma_cross_all()
+            if "error" not in ma_data:
+                logger.info("MA cross data updated successfully")
+
+                # DB 세션 생성 및 알림 체크만 수행
+                async with async_session() as session:
+                    await alert_service.check_ma_alerts(session, ma_data)
+        except Exception as e:
+            logger.error(f"Failed to update MA cross data: {str(e)}")
+
+    async def start_ma_cross_updates(self):
+        """이동평균선 돌파 체크 주기적 업데이트 (24시간마다)"""
+        while self.running:
+            try:
+                await self.update_ma_cross()
+                await asyncio.sleep(24 * 60 * 60)  # 24시간 대기
+            except Exception as e:
+                logger.error(f"Error in MA cross update: {str(e)}")
+                await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
+
     async def start(self):
         """스트리밍 서비스 시작"""
         try:
@@ -341,16 +365,18 @@ class PriceStreamService:
             await self.update_all_rsi()
             await self.update_dominance()
             await self.update_mvrv()
-            await self.update_3w_high()  # 3주 최고가 초기값 설정
+            await self.update_3w_high()
+            await self.update_ma_cross()  # MA 크로스 초기값 설정
 
             # 기존 태스크들 시작
             asyncio.create_task(self.start_rsi_updates())
             asyncio.create_task(self.start_dominance_updates())
             asyncio.create_task(self.start_mvrv_updates())
             asyncio.create_task(self.update_24h_changes())
+            asyncio.create_task(self.start_3w_high_updates())
             asyncio.create_task(
-                self.start_3w_high_updates()
-            )  # 3주 최고가 업데이트 태스크 추가
+                self.start_ma_cross_updates()
+            )  # MA 크로스 업데이트 태스크 추가
             asyncio.create_task(self.connect_upbit())
             asyncio.create_task(self.connect_binance())
 
