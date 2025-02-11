@@ -13,6 +13,9 @@ from app.database import get_session
 from pydantic import BaseModel
 from app.services.price_service import check_ma_cross_all
 import logging
+from app.services.stream_service import stream_service
+from app.utils.auth import get_current_user
+from app.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,12 @@ indicator_service = IndicatorService()
 # MVRV 업데이트를 위한 요청 모델
 class MVRVUpdate(BaseModel):
     value: float
+
+
+# MA 크로스 분석 수정을 위한 요청 모델
+class MAAnalysisUpdate(BaseModel):
+    trend: str
+    description: str
 
 
 @router.get("/rsi")
@@ -145,8 +154,19 @@ async def get_ma_cross():
     BTC/USDT의 20일, 60일, 120일, 200일 이동평균선 돌파 여부를 반환
     """
     try:
-        ma_data = await check_ma_cross_all()
+        # 캐시된 MA 크로스 데이터 가져오기
+        ma_data = stream_service.current_prices.get("ma_cross")
+        if not ma_data:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "MA_CROSS_NOT_READY",
+                    "message": "이동평균선 데이터가 아직 준비되지 않았습니다",
+                },
+            )
         return ma_data
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get MA cross data: {str(e)}")
         raise HTTPException(
@@ -154,5 +174,56 @@ async def get_ma_cross():
             detail={
                 "code": "MA_CROSS_FETCH_FAILED",
                 "message": "이동평균선 데이터 조회에 실패했습니다",
+            },
+        )
+
+
+@router.put("/ma-cross/analysis", response_model=Dict[str, Any])
+async def update_ma_analysis(
+    data: MAAnalysisUpdate,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    MA 크로스 분석 결과를 수정합니다. (관리자 전용)
+    """
+    try:
+        if not current_user.is_admin:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "NOT_ADMIN",
+                    "message": "관리자만 접근할 수 있습니다",
+                },
+            )
+
+        ma_data = stream_service.current_prices.get("ma_cross")
+        if not ma_data:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "MA_CROSS_NOT_FOUND",
+                    "message": "수정할 MA 크로스 데이터가 없습니다",
+                },
+            )
+
+        # 분석 결과 업데이트
+        ma_data["market_diagnosis"] = {
+            "trend": data.trend,
+            "description": data.description,
+        }
+        stream_service.current_prices["ma_cross"] = ma_data
+
+        logger.info(f"MA analysis updated by admin: {current_user.email}")
+        return ma_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update MA analysis: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "UPDATE_FAILED",
+                "message": "MA 크로스 분석 수정에 실패했습니다",
             },
         )

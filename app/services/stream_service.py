@@ -46,6 +46,7 @@ class PriceStreamService:
                 "usd": 0.0,
                 "timestamp": "",
             },
+            "ma_cross": None,  # MA 크로스 데이터 캐시 추가
         }
         self.prev_prices: Dict[str, float] = {"krw": 0.0, "usd": 0.0, "timestamp": ""}
         self.running = False
@@ -337,7 +338,9 @@ class PriceStreamService:
         try:
             ma_data = await check_ma_cross_all()
             if "error" not in ma_data:
-                logger.info("MA cross data updated successfully")
+                # 캐시에 MA 크로스 데이터 저장
+                self.current_prices["ma_cross"] = ma_data
+                logger.info("MA cross data cached successfully")
 
                 # DB 세션 생성 및 알림 체크만 수행
                 async with async_session() as session:
