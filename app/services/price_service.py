@@ -4,6 +4,8 @@ import aiohttp
 from typing import Dict, Any, Tuple
 from app.services.exchange_service import exchange_service
 import logging
+from langchain_openai import ChatOpenAI
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -95,10 +97,7 @@ MA_PERIODS = [20, 60, 120, 200]
 
 
 async def check_ma_cross_all() -> Dict[str, Any]:
-    """
-    BTC/USDT에 대해 20일, 60일, 120일, 200일 등
-    다양한 이동평균선 돌파 여부(±2% & 2일 연속 유지)를 확인
-    """
+    """BTC/USDT의 이동평균선 돌파 여부 확인 및 시장 상태 진단"""
     try:
         url = "https://api.binance.com/api/v3/klines"
 
@@ -169,13 +168,83 @@ async def check_ma_cross_all() -> Dict[str, Any]:
 
         logger.info(f"MA 결과: {ma_results}")
 
-        # 최종 반환 (현재 가격, 타임스탬프, 기간별 MA 결과)
+        # GPT-4를 통한 시장 상태 진단
+        market_diagnosis = await analyze_market_state(ma_results, day1_close)
+
+        # 최종 반환에 진단 결과 추가
         return {
             "price": day1_close,
             "timestamp": int(time.time()),
             "ma_results": ma_results,
+            "market_diagnosis": market_diagnosis,
         }
 
     except Exception as e:
         logger.error(f"Failed to check multiple MAs cross: {str(e)}")
         return {"error": str(e), "timestamp": int(time.time())}
+
+
+async def analyze_market_state(
+    ma_results: Dict[int, Dict[str, Any]], current_price: float
+) -> Dict[str, str]:
+    """이동평균선 데이터를 기반으로 GPT-4로 시장 상태 진단"""
+    try:
+        # MA 값들 정렬
+        ma_values = {period: data["ma_value"] for period, data in ma_results.items()}
+
+        # 현재가와 MA들의 위치 관계 분석
+        price_relations = {
+            "ma20": current_price / ma_values[20] - 1,  # 퍼센트로 변환
+            "ma60": current_price / ma_values[60] - 1,
+            "ma120": current_price / ma_values[120] - 1,
+            "ma200": current_price / ma_values[200] - 1,
+        }
+
+        # MA 간의 관계 분석
+        ma_relations = {
+            "ma20_60": ma_values[20] / ma_values[60] - 1,
+            "ma60_120": ma_values[60] / ma_values[120] - 1,
+            "ma120_200": ma_values[120] / ma_values[200] - 1,
+        }
+
+        # GPT-4 프롬프트 구성
+        prompt = f"""
+현재 비트코인의 이동평균선 상태를 분석해주세요:
+
+현재가와 이동평균선의 관계:
+- 20일선 대비: {price_relations['ma20']:.2%}
+- 60일선 대비: {price_relations['ma60']:.2%}
+- 120일선 대비: {price_relations['ma120']:.2%}
+- 200일선 대비: {price_relations['ma200']:.2%}
+
+이동평균선 간의 관계:
+- 20일선/60일선: {ma_relations['ma20_60']:.2%}
+- 60일선/120일선: {ma_relations['ma60_120']:.2%}
+- 120일선/200일선: {ma_relations['ma120_200']:.2%}
+
+위 데이터를 바탕으로 현재 시장 상태를 간단히 진단하고, 향후 전망을 제시해주세요.
+응답은 반드시 다음 형식으로 해주세요:
+{{"trend": "현재 추세를 한 단어로", "description": "상세 설명을 1-2문장으로"}}
+"""
+
+        # GPT-4 호출
+        chat = ChatOpenAI(
+            model="gpt-4o-mini", temperature=0, api_key=os.getenv("OPENAI_API_KEY")
+        )
+
+        response = chat.invoke(prompt)
+
+        # 응답 파싱 (GPT가 JSON 형식으로 응답했다고 가정)
+        import json
+
+        result = json.loads(response.content)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"GPT analysis failed: {str(e)}")
+        # GPT 분석 실패시 기본 분석 결과 반환
+        return {
+            "trend": "분석 불가",
+            "description": "이동평균선 분석은 가능하나 GPT 상세 분석에 실패했습니다.",
+        }
