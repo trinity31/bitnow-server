@@ -51,7 +51,7 @@ class AlertService:
         """새로운 알림 조건 생성"""
         try:
             # 알림 타입 검증
-            valid_types = ["price", "rsi", "kimchi_premium", "dominance", "mvrv"]
+            valid_types = ["price", "rsi", "kimchi_premium", "dominance", "mvrv", "ma"]
             if alert_data["type"].lower() not in valid_types:
                 raise ValueError(
                     f"유효하지 않은 알림 타입입니다. ({', '.join(valid_types)})"
@@ -504,12 +504,23 @@ class AlertService:
                 logger.exception(e)
                 await session.rollback()
 
-    def create_alert_message(
+    async def create_alert_message(
         self, alert: Alert, additional_data: Dict[str, Any] = None
     ) -> str:
         """알림 메시지 생성"""
         locale = alert.user.locale if alert.user and alert.user.locale else "en"
         messages = ALERT_MESSAGES.get(locale, ALERT_MESSAGES["en"])
+
+        # MA 알림 메시지
+        if alert.type == "ma":
+            direction_text = (
+                messages["above"] if alert.direction == "above" else messages["below"]
+            )
+            if locale == "ko":
+                message = f"{alert.symbol} {alert.interval}일선을{direction_text}"
+            else:
+                message = f"{alert.symbol} {alert.interval}-day MA{direction_text}"
+            return message
 
         if alert.type == "mvrv":
             if locale == "ko":
@@ -639,7 +650,7 @@ class AlertService:
                 # 상향 전환 알림
                 if direction_changed_up:
                     alerts = await self.get_alerts_by_type(
-                        session, "ma", f"ma{period}", "above"
+                        session, "ma", str(period), "above"
                     )
                     for alert in alerts:
                         if alert.is_active:
@@ -648,7 +659,7 @@ class AlertService:
                 # 하향 전환 알림
                 if direction_changed_down:
                     alerts = await self.get_alerts_by_type(
-                        session, "ma", f"ma{period}", "below"
+                        session, "ma", str(period), "below"
                     )
                     for alert in alerts:
                         if alert.is_active:
@@ -660,6 +671,30 @@ class AlertService:
         except Exception as e:
             logger.error(f"Error checking MA alerts: {str(e)}")
             logger.exception(e)
+
+    async def get_alerts_by_type(
+        self, session: AsyncSession, alert_type: str, interval: str, direction: str
+    ) -> List[Alert]:
+        """특정 타입의 알림 조회"""
+        try:
+            query = (
+                select(Alert)
+                .where(
+                    Alert.type == alert_type,
+                    Alert.interval == interval,
+                    Alert.direction == direction,
+                    Alert.is_active == True,
+                )
+                .join(Alert.user)  # user 정보도 함께 로드
+            )
+
+            result = await session.execute(query)
+            alerts = result.scalars().all()
+            return alerts
+
+        except Exception as e:
+            logger.error(f"Failed to get alerts by type: {str(e)}")
+            return []
 
 
 # 싱글톤 인스턴스 생성

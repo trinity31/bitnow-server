@@ -36,6 +36,19 @@ async def create_alert_condition(
         locale = current_user.locale or "en"
         messages = ERROR_MESSAGES.get(locale, ERROR_MESSAGES["en"])
 
+        # MA 알림 유효성 검사
+        if alert_data.type == "ma":
+            if alert_data.interval not in ["20", "60", "120", "200"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "INVALID_MA_INTERVAL",
+                        "message": "MA 알림은 20, 60, 120, 200일만 가능합니다",
+                    },
+                )
+            # MA 알림은 threshold를 0으로 설정
+            alert_data.threshold = 0.0
+
         # 통화 검증
         if alert_data.type == "price" and alert_data.currency not in ["KRW", "USD"]:
             raise HTTPException(
@@ -57,7 +70,7 @@ async def create_alert_condition(
 
         if alert_data.type == "price":
             query = query.where(Alert.currency == alert_data.currency)
-        if alert_data.type == "rsi":
+        if alert_data.type in ["rsi", "ma"]:
             query = query.where(Alert.interval == alert_data.interval)
 
         result = await session.execute(query)

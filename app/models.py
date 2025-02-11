@@ -29,11 +29,13 @@ class Alert(Base):
 
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    type = Column(String)  # price, rsi, kimchi_premium, dominance, mvrv
+    type = Column(String)  # price, rsi, kimchi_premium, dominance, mvrv, ma
     symbol = Column(String)
     threshold = Column(Float)
     direction = Column(String)  # above, below
-    interval = Column(String, nullable=True)  # RSI용 (15m, 1h, 4h, 1d)
+    interval = Column(
+        String, nullable=True
+    )  # RSI용 (15m, 1h, 4h, 1d), MA용 (20, 60, 120, 200)
     currency = Column(String, default="KRW")  # KRW 또는 USD
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
