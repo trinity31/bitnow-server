@@ -465,7 +465,9 @@ class AlertService:
                 await self.refresh_cache(session)
 
                 # 푸시 알림 전송
-                message = self.create_alert_message(alert_with_user, additional_data)
+                message = await self.create_alert_message(
+                    alert_with_user, additional_data
+                )
                 if alert_with_user.user and alert_with_user.user.fcm_token:
                     logger.info(
                         f"Using FCM token: {alert_with_user.user.fcm_token[:10]}..."
