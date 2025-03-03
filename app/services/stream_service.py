@@ -358,6 +358,17 @@ class PriceStreamService:
                 logger.error(f"Error in MA cross update: {str(e)}")
                 await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
 
+    async def reset_manual_exchange_rate(self):
+        """수동 설정된 환율 초기화 (24시간마다)"""
+        while self.running:
+            try:
+                await exchange_service.reset_manual_rate()
+                logger.info("Manual exchange rate has been reset")
+                await asyncio.sleep(24 * 60 * 60)  # 24시간 대기
+            except Exception as e:
+                logger.error(f"Error in exchange rate reset: {str(e)}")
+                await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
+
     async def start(self):
         """스트리밍 서비스 시작"""
         try:
@@ -380,6 +391,9 @@ class PriceStreamService:
             asyncio.create_task(
                 self.start_ma_cross_updates()
             )  # MA 크로스 업데이트 태스크 추가
+            asyncio.create_task(
+                self.reset_manual_exchange_rate()
+            )  # 환율 초기화 태스크 추가
             asyncio.create_task(self.connect_upbit())
             asyncio.create_task(self.connect_binance())
 

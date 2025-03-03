@@ -11,9 +11,12 @@ from app.constants import (
 )
 import pandas as pd
 from typing import List, Dict, Any
+import logging
 
 # .env 파일에서 환경변수 로드
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class ExchangeRateService:
@@ -21,22 +24,24 @@ class ExchangeRateService:
         self.primary_url = EXCHANGE_RATE_API_URL
         self.backup_url = ALPHA_VANTAGE_URL
         self.api_key = os.getenv("ALPHA_VANTAGE_API_KEY")
-        self._cached_rate: Optional[float] = None
-        self._last_updated: Optional[datetime] = None
+        self.cached_rate = DEFAULT_USD_KRW_RATE
+        self.last_update = None
+        self.manual_rate = None  # 관리자가 수동 설정한 환율
+        self.manual_rate_time = None
 
     def _is_cache_valid(self) -> bool:
         """캐시가 유효한지 확인합니다."""
         return (
-            self._cached_rate is not None
-            and self._last_updated is not None
-            and datetime.now() - self._last_updated
+            self.cached_rate is not None
+            and self.last_update is not None
+            and datetime.now() - self.last_update
             < timedelta(hours=CACHE_DURATION_HOURS)
         )
 
     def _update_cache(self, rate: float) -> None:
         """환율 캐시를 업데이트합니다."""
-        self._cached_rate = rate
-        self._last_updated = datetime.now()
+        self.cached_rate = rate
+        self.last_update = datetime.now()
         print(f"조회된 환율: {rate}")
 
     async def _fetch_from_er_api(self) -> Optional[float]:
@@ -74,26 +79,66 @@ class ExchangeRateService:
             return None
 
     async def get_usd_krw_rate(self) -> float:
-        """USD/KRW 환율을 조회합니다."""
-        if self._is_cache_valid():
-            return self._cached_rate
+        """USD/KRW 환율 조회 (캐시 사용)"""
+        # 수동 설정된 환율이 있으면 우선 사용
+        if self.manual_rate is not None:
+            # logger.debug(f"수동 설정된 환율 사용: {self.manual_rate}")
+            return self.manual_rate
 
-        # 첫 번째 API 시도
-        rate = await self._fetch_from_er_api()
+        # 캐시가 유효한지 확인
+        now = datetime.now()
+        if self.last_update and (now - self.last_update) < timedelta(
+            hours=CACHE_DURATION_HOURS
+        ):
+            logger.debug(f"캐시된 환율 사용: {self.cached_rate}")
+            return self.cached_rate
 
-       # print(f"ExchangeRate-API 조회 결과: {rate}")
-
-        # 실패하면 백업 API 시도
-        if rate is None:
+        try:
+            # 첫 번째 API 시도
             rate = await self._fetch_from_alpha_vantage()
 
-        # 모두 실패하면 기본값 사용
-        if rate is None:
-            print("모든 API 조회 실패. 기본값 사용")
-            return DEFAULT_USD_KRW_RATE
+            # 실패하면 백업 API 시도
+            if rate is None:
+                rate = await self._fetch_from_er_api()
 
-        self._update_cache(rate)
-        return rate
+            # 성공적으로 가져왔다면 캐시 업데이트
+            if rate is not None:
+                self.cached_rate = rate
+                self.last_update = now
+                logger.info(f"새로운 환율 업데이트: {rate}")
+                return rate
+
+        except Exception as e:
+            logger.error(f"Failed to fetch exchange rate: {str(e)}")
+
+        # API 호출 실패시 캐시된 값 반환
+        logger.warning(f"API 호출 실패, 캐시된 환율 사용: {self.cached_rate}")
+        return self.cached_rate
+
+    async def set_manual_rate(self, rate: float) -> dict:
+        """관리자용 수동 환율 설정"""
+        self.manual_rate = rate
+        self.manual_rate_time = datetime.now()
+        return {
+            "rate": rate,
+            "timestamp": self.manual_rate_time.isoformat(),
+            "message": "환율이 수동으로 설정되었습니다",
+        }
+
+    async def reset_manual_rate(self) -> dict:
+        """수동 설정 환율 초기화"""
+        self.manual_rate = None
+        self.manual_rate_time = None
+        # 캐시도 초기화하여 새로운 환율을 즉시 가져오도록 함
+        self.last_update = None
+
+        # 새로운 환율 즉시 조회
+        new_rate = await self.get_usd_krw_rate()
+
+        return {
+            "message": "수동 설정된 환율이 초기화되었습니다",
+            "current_rate": new_rate,
+        }
 
     async def get_candles(
         self, symbol: str = "BTC", interval: str = "15m", length: int = 14
@@ -208,7 +253,7 @@ class ExchangeRateService:
                 async with session.get(url, params=params) as response:
                     if response.status == 200:
                         data = await response.json()
-                        # 업비트 캔� 데이터 포맷 변환
+                        # 업비트 캔들 데이터 포맷 변환
                         return [
                             {
                                 "timestamp": candle["candle_date_time_utc"],

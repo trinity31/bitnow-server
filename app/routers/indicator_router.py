@@ -16,11 +16,17 @@ import logging
 from app.services.stream_service import stream_service
 from app.utils.auth import get_current_user
 from app.models import User
+from app.services.exchange_service import exchange_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/indicator", tags=["indicators"])
 indicator_service = IndicatorService()
+
+
+# 환율 수동 설정을 위한 요청 모델
+class ExchangeRateUpdate(BaseModel):
+    rate: float
 
 
 # MVRV 업데이트를 위한 요청 모델
@@ -227,3 +233,49 @@ async def update_ma_analysis(
                 "message": "MA 크로스 분석 수정에 실패했습니다",
             },
         )
+
+
+@router.put("/exchange-rate", response_model=Dict[str, Any])
+async def update_exchange_rate(
+    data: ExchangeRateUpdate, current_user: User = Depends(get_current_user)
+):
+    """환율 수동 설정 (관리자 전용)"""
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "NOT_ADMIN", "message": "관리자만 접근할 수 있습니다"},
+        )
+
+    return await exchange_service.set_manual_rate(data.rate)
+
+
+@router.delete("/exchange-rate", response_model=Dict[str, Any])
+async def reset_exchange_rate(current_user: User = Depends(get_current_user)):
+    """수동 설정 환율 초기화 (관리자 전용)"""
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "NOT_ADMIN", "message": "관리자만 접근할 수 있습니다"},
+        )
+
+    return await exchange_service.reset_manual_rate()
+
+
+@router.get("/exchange-rate", response_model=Dict[str, Any])
+async def get_exchange_rate():
+    """현재 환율 조회"""
+    rate = await exchange_service.get_usd_krw_rate()
+    return {
+        "rate": rate,
+        "is_manual": exchange_service.manual_rate is not None,
+        "last_update": (
+            exchange_service.last_update.isoformat()
+            if exchange_service.last_update
+            else None
+        ),
+        "manual_update": (
+            exchange_service.manual_rate_time.isoformat()
+            if exchange_service.manual_rate_time
+            else None
+        ),
+    }
