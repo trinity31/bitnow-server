@@ -47,6 +47,11 @@ class PriceStreamService:
                 "timestamp": "",
             },
             "ma_cross": None,  # MA 크로스 데이터 캐시 추가
+            "fear_greed": {  # 공포/탐욕 지수 추가
+                "value": 0,
+                "classification": "neutral",
+                "timestamp": "",
+            },
         }
         self.prev_prices: Dict[str, float] = {"krw": 0.0, "usd": 0.0, "timestamp": ""}
         self.running = False
@@ -369,6 +374,38 @@ class PriceStreamService:
                 logger.error(f"Error in exchange rate reset: {str(e)}")
                 await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
 
+    async def update_fear_greed(self):
+        """공포/탐욕 지수 업데이트"""
+        try:
+            # db 세션 생성
+            async with async_session() as session:
+                fear_greed_data = await indicator_service.get_fear_greed_index(session)
+                self.current_prices["fear_greed"] = {
+                    "value": fear_greed_data["value"],
+                    "classification": fear_greed_data["classification"],
+                    "timestamp": fear_greed_data["timestamp"],
+                }
+                logger.info(
+                    f"공포/탐욕 지수 업데이트: {self.current_prices['fear_greed']['value']} ({self.current_prices['fear_greed']['classification']})"
+                )
+
+                # 알림 체크 (필요한 경우)
+                await alert_service.check_fear_greed_alerts(
+                    session, self.current_prices
+                )
+        except Exception as e:
+            logger.error(f"공포/탐욕 지수 업데이트 중 오류 발생: {str(e)}")
+
+    async def start_fear_greed_updates(self):
+        """공포/탐욕 지수 주기적 업데이트 (24시간마다)"""
+        while self.running:
+            try:
+                await self.update_fear_greed()
+                await asyncio.sleep(24 * 60 * 60)  # 24시간 대기
+            except Exception as e:
+                logger.error(f"공포/탐욕 지수 업데이트 태스크 오류: {str(e)}")
+                await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
+
     async def start(self):
         """스트리밍 서비스 시작"""
         try:
@@ -381,6 +418,7 @@ class PriceStreamService:
             await self.update_mvrv()
             await self.update_3w_high()
             await self.update_ma_cross()  # MA 크로스 초기값 설정
+            await self.update_fear_greed()  # 공포/탐욕 지수 초기값 설정
 
             # 기존 태스크들 시작
             asyncio.create_task(self.start_rsi_updates())
@@ -394,6 +432,9 @@ class PriceStreamService:
             asyncio.create_task(
                 self.reset_manual_exchange_rate()
             )  # 환율 초기화 태스크 추가
+            asyncio.create_task(
+                self.start_fear_greed_updates()
+            )  # 공포/탐욕 지수 업데이트 태스크 추가
             asyncio.create_task(self.connect_upbit())
             asyncio.create_task(self.connect_binance())
 

@@ -80,3 +80,14 @@ class CreditHistory(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User")
+
+
+class FearGreedIndicator(Base):
+    __tablename__ = "fear_greed_indicators"
+
+    id = Column(Integer, primary_key=True, index=True)
+    value = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+
+    def __repr__(self):
+        return f"<FearGreedIndicator(id={self.id}, value={self.value}, created_at={self.created_at})>"

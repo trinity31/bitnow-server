@@ -57,3 +57,7 @@ BATCH_CREATE_THRESHOLD = 1
 INITIAL_CREDIT_AMOUNT = 10  # 신규 사용자 초기 크레딧
 CREDIT_PER_AD_VIEW = 10  # 광고 시청당 적립 크레딧
 MIN_CREDIT_FOR_ALERT = 1  # 알림 발송에 필요한 최소 크레딧
+
+# 공포/탐욕 지수 관련 상수
+FEAR_GREED_API_URL = "https://api.alternative.me/fng/"
+MOCK_FEAR_GREED_INDEX = 50

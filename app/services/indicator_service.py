@@ -11,9 +11,11 @@ from ..constants import (
     DEFAULT_SYMBOL,
     MOCK_DOMINANCE,
     MOCK_MVRV,
+    MOCK_FEAR_GREED_INDEX,
     COINMARKETCAP_API_URL,
     RSI_INTERVALS,
     GLASSNODE_API_URL,
+    FEAR_GREED_API_URL,
 )
 import numpy as np
 import aiohttp
@@ -24,7 +26,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.sql import desc
-from app.models import MVRVIndicator
+from app.models import MVRVIndicator, FearGreedIndicator
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +223,166 @@ class IndicatorService:
         except Exception as e:
             await db.rollback()
             logger.error(f"MVRV 삭제 중 오류 발생: {str(e)}")
+            raise
+
+    async def get_fear_greed_index(self, db: AsyncSession) -> Dict[str, Any]:
+        """공포/탐욕 지수 조회"""
+        try:
+            # DB에서 최신 공포/탐욕 지수 값 조회
+            query = (
+                select(FearGreedIndicator)
+                .order_by(desc(FearGreedIndicator.created_at))
+                .limit(1)
+            )
+            result = await db.execute(query)
+            latest = result.scalar_one_or_none()
+
+            # 오늘 날짜의 데이터가 있으면 반환
+            if latest and latest.created_at.date() == datetime.now().date():
+                return {
+                    "value": latest.value,
+                    "classification": self._get_fear_greed_classification(latest.value),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+
+            # DB에 오늘 데이터가 없으면 API에서 가져오기
+            url = FEAR_GREED_API_URL
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        fear_greed_value = int(data["data"][0]["value"])
+
+                        # DB에 저장
+                        new_fear_greed = FearGreedIndicator(value=fear_greed_value)
+                        db.add(new_fear_greed)
+                        await db.commit()
+                        await db.refresh(new_fear_greed)
+
+                        return {
+                            "value": fear_greed_value,
+                            "classification": self._get_fear_greed_classification(
+                                fear_greed_value
+                            ),
+                            "timestamp": datetime.now().isoformat(),
+                        }
+                    else:
+                        logger.warning("Fear & Greed API 호출 실패, 기본값 사용")
+                        return {
+                            "value": MOCK_FEAR_GREED_INDEX,
+                            "classification": self._get_fear_greed_classification(
+                                MOCK_FEAR_GREED_INDEX
+                            ),
+                            "timestamp": datetime.now().isoformat(),
+                        }
+
+        except Exception as e:
+            logger.error(f"공포/탐욕 지수 조회 중 오류 발생: {str(e)}")
+            return {
+                "value": MOCK_FEAR_GREED_INDEX,
+                "classification": self._get_fear_greed_classification(
+                    MOCK_FEAR_GREED_INDEX
+                ),
+                "timestamp": datetime.now().isoformat(),
+            }
+
+    def _get_fear_greed_classification(self, value: int) -> str:
+        """공포/탐욕 지수 값에 따른 분류 반환"""
+        if value <= 24:
+            return "extreme_fear"
+        elif value <= 44:
+            return "fear"
+        elif value <= 54:
+            return "neutral"
+        elif value <= 74:
+            return "greed"
+        else:
+            return "extreme_greed"
+
+    async def create_fear_greed(self, db: AsyncSession, value: int) -> Dict[str, Any]:
+        """새로운 공포/탐욕 지수 값을 생성합니다."""
+        try:
+            new_fear_greed = FearGreedIndicator(value=value)
+            db.add(new_fear_greed)
+            await db.commit()
+            await db.refresh(new_fear_greed)
+
+            return {
+                "value": new_fear_greed.value,
+                "classification": self._get_fear_greed_classification(
+                    new_fear_greed.value
+                ),
+                "timestamp": new_fear_greed.created_at.isoformat(),
+            }
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"공포/탐욕 지수 생성 중 오류 발생: {str(e)}")
+            raise
+
+    async def update_fear_greed(self, db: AsyncSession, value: int) -> Dict[str, Any]:
+        """가장 최근 공포/탐욕 지수 값을 업데이트합니다."""
+        try:
+            # 가장 최근 공포/탐욕 지수 레코드 조회
+            query = (
+                select(FearGreedIndicator)
+                .order_by(desc(FearGreedIndicator.created_at))
+                .limit(1)
+            )
+            result = await db.execute(query)
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                # 기존 레코드 업데이트
+                latest.value = value
+                await db.commit()
+                await db.refresh(latest)
+
+                return {
+                    "value": latest.value,
+                    "classification": self._get_fear_greed_classification(latest.value),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+            else:
+                # 레코드가 없으면 새로 생성
+                return await self.create_fear_greed(db, value)
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"공포/탐욕 지수 업데이트 중 오류 발생: {str(e)}")
+            raise
+
+    async def delete_latest_fear_greed(self, db: AsyncSession) -> Dict[str, Any]:
+        """가장 최근 공포/탐욕 지수 값을 삭제합니다."""
+        try:
+            # 가장 최근 공포/탐욕 지수 레코드 조회
+            query = (
+                select(FearGreedIndicator)
+                .order_by(desc(FearGreedIndicator.created_at))
+                .limit(1)
+            )
+            result = await db.execute(query)
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                # 삭제할 공포/탐욕 지수 정보 저장
+                deleted_info = {
+                    "value": latest.value,
+                    "classification": self._get_fear_greed_classification(latest.value),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+                # 레코드 삭제
+                await db.delete(latest)
+                await db.commit()
+                return deleted_info
+            else:
+                raise HTTPException(
+                    status_code=404, detail="삭제할 공포/탐욕 지수 레코드가 없습니다."
+                )
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"공포/탐욕 지수 삭제 중 오류 발생: {str(e)}")
             raise
 
 

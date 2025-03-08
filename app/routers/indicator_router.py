@@ -40,6 +40,11 @@ class MAAnalysisUpdate(BaseModel):
     description: str
 
 
+# 공포/탐욕 지수 업데이트를 위한 요청 모델
+class FearGreedUpdate(BaseModel):
+    value: int
+
+
 @router.get("/rsi")
 async def get_rsi(
     symbol: str = Query(DEFAULT_SYMBOL, description="암호화폐 심볼 (예: BTC)"),
@@ -63,6 +68,23 @@ async def get_rsi(
     else:
         actual_interval = RSI_INTERVALS.get(interval, interval)
         return await indicator_service.calculate_rsi(symbol, actual_interval, length)
+
+
+@router.get("/fear-greed")
+async def get_fear_greed_index(
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    현재 공포/탐욕 지수를 조회합니다.
+
+    Returns:
+        dict: {
+            "value": int,  # 공포/탐욕 지수 값 (0-100)
+            "classification": str,  # 분류 (extreme_fear, fear, neutral, greed, extreme_greed)
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    return await indicator_service.get_fear_greed_index(db)
 
 
 @router.get("/dominance")
