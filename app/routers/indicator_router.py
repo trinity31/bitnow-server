@@ -43,6 +43,7 @@ class MAAnalysisUpdate(BaseModel):
 # 공포/탐욕 지수 업데이트를 위한 요청 모델
 class FearGreedUpdate(BaseModel):
     value: int
+    classification: str = None  # 선택적 분류 필드
 
 
 @router.get("/rsi")
@@ -301,3 +302,54 @@ async def get_exchange_rate():
             else None
         ),
     }
+
+
+@router.put("/fear-greed", response_model=Dict[str, Any])
+async def update_fear_greed_index(
+    data: FearGreedUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """공포/탐욕 지수를 수동으로 업데이트합니다. (관리자 전용)"""
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "NOT_ADMIN", "message": "관리자만 접근할 수 있습니다"},
+        )
+
+    try:
+        # 값에 따른 분류 자동 설정 (사용자가 제공하지 않은 경우)
+        if data.classification is None:
+            if data.value <= 20:
+                data.classification = "extreme_fear"
+            elif data.value <= 40:
+                data.classification = "fear"
+            elif data.value <= 60:
+                data.classification = "neutral"
+            elif data.value <= 80:
+                data.classification = "greed"
+            else:
+                data.classification = "extreme_greed"
+
+        # 지수 업데이트
+        result = await indicator_service.update_fear_greed(db, data.value)
+
+        # 스트림 서비스의 캐시 업데이트
+        stream_service.current_prices["fear_greed"] = {
+            "value": result["value"],
+            "classification": result["classification"],
+            "timestamp": result["timestamp"],
+        }
+
+        logger.info(f"Fear & Greed index updated by admin: {current_user.email}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to update Fear & Greed index: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "UPDATE_FAILED",
+                "message": "공포/탐욕 지수 업데이트에 실패했습니다",
+            },
+        )
