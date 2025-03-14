@@ -10,11 +10,11 @@ RUN apt-get update && apt-get install -y \
 
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-EXPOSE 8002
 
 # 프로덕션 환경 설정
 ENV ENVIRONMENT=prod
 ENV TZ=Asia/Seoul
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8002"]
+# Railway는 PORT 환경 변수를 자동으로 제공합니다
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}

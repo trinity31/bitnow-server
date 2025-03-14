@@ -4,31 +4,14 @@ import os
 import logging
 from dotenv import load_dotenv
 import asyncio
-
+from app.services.firebase_service import firebase_service
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 
 class PushService:
     def __init__(self):
-        self.initialized = False
-        self.initialize_firebase()
-
-    def initialize_firebase(self):
-        try:
-            if not self.initialized:
-                cred_path = os.getenv("FIREBASE_CREDENTIALS")
-                if cred_path:
-                    cred = credentials.Certificate(cred_path)
-                    firebase_admin.initialize_app(cred)
-                    self.initialized = True
-                    logger.info("Firebase Admin SDK initialized successfully")
-                else:
-                    logger.warning(
-                        "FIREBASE_CREDENTIALS not found in environment variables"
-                    )
-        except Exception as e:
-            logger.error(f"Failed to initialize Firebase: {str(e)}")
+        self.initialized = firebase_service.initialized
 
     async def send_push_notification(self, token: str, title: str, body: str):
         """단일 기기에 푸시 알림을 전송합니다."""

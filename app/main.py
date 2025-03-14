@@ -18,7 +18,7 @@ import logging
 from app.database import engine
 from app.models import Base
 from contextlib import asynccontextmanager
-
+from app.constants import API_TITLE, API_DESCRIPTION, DEFAULT_API_VERSION
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -35,9 +35,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="BitNow API",
-    description="실시간 암호화폐 가격 및 기술적 지표 제공 API",
-    version="1.0.0",
+    title=API_TITLE,
+    description=API_DESCRIPTION,
+    version=DEFAULT_API_VERSION,
     lifespan=lifespan,
     # OpenAPI에 보안 스키마 추가
     openapi_tags=[
@@ -125,10 +125,14 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+    import os
+    from app.constants import DEFAULT_HOST, DEFAULT_PORT
+
+    port = int(os.environ.get("PORT", DEFAULT_PORT))
 
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",  # 모든 네트워크 인터페이스에서 접근 허용
-        port=8000,
+        host=DEFAULT_HOST,
+        port=port,
         reload=True,
     )
