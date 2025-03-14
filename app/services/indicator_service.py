@@ -14,7 +14,6 @@ from ..constants import (
     MOCK_FEAR_GREED_INDEX,
     COINMARKETCAP_API_URL,
     RSI_INTERVALS,
-    GLASSNODE_API_URL,
     FEAR_GREED_API_URL,
 )
 import numpy as np
@@ -36,7 +35,7 @@ load_dotenv()
 class IndicatorService:
     def __init__(self):
         self.coinmarketcap_api_key = os.getenv("COINMARKETCAP_API_KEY")
-        self.glassnode_api_key = os.getenv("GLASSNODE_API_KEY")
+        # self.glassnode_api_key = os.getenv("GLASSNODE_API_KEY")
 
     async def calculate_rsi(
         self, symbol: str = "BTC", interval: str = "15m", length: int = 14

@@ -389,10 +389,10 @@ class PriceStreamService:
                     f"공포/탐욕 지수 업데이트: {self.current_prices['fear_greed']['value']} ({self.current_prices['fear_greed']['classification']})"
                 )
 
-                # 알림 체크 (필요한 경우)
-                await alert_service.check_fear_greed_alerts(
-                    session, self.current_prices
-                )
+                # 알림 체크 부분 제거 (필요 없음)
+                # await alert_service.check_fear_greed_alerts(
+                #     session, self.current_prices
+                # )
         except Exception as e:
             logger.error(f"공포/탐욕 지수 업데이트 중 오류 발생: {str(e)}")
 
