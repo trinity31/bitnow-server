@@ -34,6 +34,13 @@ class PriceStreamService:
             "timestamp": "",
             "kimchi_premium": 0.0,
             "change_24h": {"krw": 0.0, "usd": 0.0},
+            "volume": {  # 시간 간격별 누적 거래량 정보
+                "1m": {"krw": 0.0, "usd": 0.0},
+                "5m": {"krw": 0.0, "usd": 0.0},
+                "15m": {"krw": 0.0, "usd": 0.0},
+                "1h": {"krw": 0.0, "usd": 0.0},
+                "24h": {"krw": 0.0, "usd": 0.0},
+            },
             "rsi": {
                 "15m": 0.0,
                 "1h": 0.0,
@@ -53,7 +60,17 @@ class PriceStreamService:
                 "timestamp": "",
             },
         }
-        self.prev_prices: Dict[str, float] = {"krw": 0.0, "usd": 0.0, "timestamp": ""}
+        self.prev_prices: Dict[str, Any] = {"krw": 0.0, "usd": 0.0, "timestamp": ""}
+        # 시간 간격별 마지막 갱신 시간
+        self.last_volume_update = {
+            "1m": datetime.now(),
+            "5m": datetime.now(),
+            "15m": datetime.now(),
+            "1h": datetime.now(),
+            "24h": datetime.now(),
+        }
+        # 캔들 데이터 캐시
+        self.candle_cache = {"krw": {}, "usd": {}}
         self.running = False
         self.last_broadcast_time = datetime.now()
         self.broadcast_interval = 1.0  # 1초로 변경
@@ -448,7 +465,137 @@ class PriceStreamService:
         while self.running:
             await self.fetch_upbit_24h_change()
             await self.fetch_binance_24h_change()
+            await self.update_volume_data()
             await asyncio.sleep(60)  # 1분 대기
+
+    async def fetch_upbit_candles(self, interval: str) -> Dict[str, float]:
+        """업비트 API에서 특정 간격의 캔들 데이터 가져오기"""
+        try:
+            # 업비트 간격 형식 변환 (1m, 5m, 15m, 60m, 24h)
+            upbit_interval = {
+                "1m": "minutes/1",
+                "5m": "minutes/5",
+                "15m": "minutes/15",
+                "1h": "minutes/60",
+                "24h": "days",
+            }.get(interval, "minutes/1")
+
+            url = f"https://api.upbit.com/v1/candles/{upbit_interval}"
+            params = {"market": "KRW-BTC", "count": 1}  # 가장 최근 캔들 1개만 가져오기
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data and len(data) > 0:
+                            candle = data[0]
+                            # 거래량 및 시간 추출
+                            volume = float(candle.get("candle_acc_trade_volume", 0))
+                            timestamp = candle.get("candle_date_time_utc", "")
+
+                            # 캐시 저장
+                            self.candle_cache["krw"][interval] = {
+                                "volume": volume,
+                                "timestamp": timestamp,
+                            }
+
+                            return {"volume": volume, "timestamp": timestamp}
+
+            # 요청 실패 시 캐시된 데이터 사용
+            if interval in self.candle_cache["krw"]:
+                return self.candle_cache["krw"][interval]
+
+            return {"volume": 0.0, "timestamp": ""}
+        except Exception as e:
+            logger.error(f"업비트 캔들 데이터 가져오기 오류: {str(e)}")
+            # 오류 발생 시 캐시된 데이터 사용
+            if interval in self.candle_cache["krw"]:
+                return self.candle_cache["krw"][interval]
+            return {"volume": 0.0, "timestamp": ""}
+
+    async def fetch_binance_candles(self, interval: str) -> Dict[str, float]:
+        """바이낸스 API에서 특정 간격의 캔들 데이터 가져오기"""
+        try:
+            # 바이낸스 간격 형식 변환 (1m, 5m, 15m, 1h, 1d)
+            binance_interval = {
+                "1m": "1m",
+                "5m": "5m",
+                "15m": "15m",
+                "1h": "1h",
+                "24h": "1d",
+            }.get(interval, "1m")
+
+            url = "https://api.binance.com/api/v3/klines"
+            params = {
+                "symbol": "BTCUSDT",
+                "interval": binance_interval,
+                "limit": 1,  # 가장 최근 캔들 1개만 가져오기
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data and len(data) > 0:
+                            # 바이낸스 응답 형식: [
+                            # [개장시간, 개장가, 최고가, 최저가, 종가, 거래량, ...]]
+                            candle = data[0]
+                            volume = float(candle[5])  # 5번째 인덱스가 거래량
+                            timestamp = datetime.fromtimestamp(
+                                candle[0] / 1000
+                            ).isoformat()
+
+                            # 캐시 저장
+                            self.candle_cache["usd"][interval] = {
+                                "volume": volume,
+                                "timestamp": timestamp,
+                            }
+
+                            return {"volume": volume, "timestamp": timestamp}
+
+            # 요청 실패 시 캐시된 데이터 사용
+            if interval in self.candle_cache["usd"]:
+                return self.candle_cache["usd"][interval]
+
+            return {"volume": 0.0, "timestamp": ""}
+        except Exception as e:
+            logger.error(f"바이낸스 캔들 데이터 가져오기 오류: {str(e)}")
+            # 오류 발생 시 캐시된 데이터 사용
+            if interval in self.candle_cache["usd"]:
+                return self.candle_cache["usd"][interval]
+            return {"volume": 0.0, "timestamp": ""}
+
+    async def update_volume_data(self):
+        """REST API를 사용하여 모든 시간 간격의 거래량 업데이트"""
+        # 시간 간격 정의
+        intervals = ["1m", "5m", "15m", "1h", "24h"]
+
+        for interval in intervals:
+            # 업데이트 주기 체크
+            minutes_map = {"1m": 1, "5m": 5, "15m": 15, "1h": 60, "24h": 24 * 60}
+            minutes = minutes_map[interval]
+            update_interval = max(
+                1, minutes // 5
+            )  # 최소 1분마다, 간격의 1/5 주기로 업데이트
+
+            current_time = datetime.now()
+            time_diff = (
+                current_time - self.last_volume_update[interval]
+            ).total_seconds() / 60
+
+            if time_diff >= update_interval:
+                # 업비트(KRW) 거래량 가져오기
+                upbit_data = await self.fetch_upbit_candles(interval)
+                self.current_prices["volume"][interval]["krw"] = upbit_data["volume"]
+
+                # 바이낸스(USD) 거래량 가져오기
+                binance_data = await self.fetch_binance_candles(interval)
+                self.current_prices["volume"][interval]["usd"] = binance_data["volume"]
+
+                # 마지막 업데이트 시간 기록
+                self.last_volume_update[interval] = current_time
+
+        logger.info(f"거래량 데이터 업데이트 완료: {current_time.isoformat()}")
 
     async def stop(self):
         """스트리밍 서비스 중지"""
