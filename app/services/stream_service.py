@@ -34,12 +34,12 @@ class PriceStreamService:
             "timestamp": "",
             "kimchi_premium": 0.0,
             "change_24h": {"krw": 0.0, "usd": 0.0},
-            "volume": {  # 시간 간격별 누적 거래량 정보
-                "1m": {"krw": 0.0, "usd": 0.0},
-                "5m": {"krw": 0.0, "usd": 0.0},
-                "15m": {"krw": 0.0, "usd": 0.0},
-                "1h": {"krw": 0.0, "usd": 0.0},
-                "24h": {"krw": 0.0, "usd": 0.0},
+            "volume": {  # 시간 간격별 누적 거래량 정보 (BTC 개수)
+                "1m": 0.0,
+                "5m": 0.0,
+                "15m": 0.0,
+                "1h": 0.0,
+                "24h": 0.0,
             },
             "rsi": {
                 "15m": 0.0,
@@ -584,13 +584,9 @@ class PriceStreamService:
             ).total_seconds() / 60
 
             if time_diff >= update_interval:
-                # 업비트(KRW) 거래량 가져오기
-                upbit_data = await self.fetch_upbit_candles(interval)
-                self.current_prices["volume"][interval]["krw"] = upbit_data["volume"]
-
-                # 바이낸스(USD) 거래량 가져오기
+                # 바이낸스 거래량(BTC 개수) 가져오기
                 binance_data = await self.fetch_binance_candles(interval)
-                self.current_prices["volume"][interval]["usd"] = binance_data["volume"]
+                self.current_prices["volume"][interval] = binance_data["volume"]
 
                 # 마지막 업데이트 시간 기록
                 self.last_volume_update[interval] = current_time
