@@ -60,6 +60,7 @@ class PriceStreamService:
                 "timestamp": "",
             },
             "eth_btc_ratio": 0.0,  # ETH/BTC 비율 추가
+            "stablecoin_inflow_ratio": 0.0,  # 스테이블코인 유입 비율 추가
         }
         self.prev_prices: Dict[str, Any] = {"krw": 0.0, "usd": 0.0, "timestamp": ""}
         # 시간 간격별 마지막 갱신 시간
@@ -443,6 +444,29 @@ class PriceStreamService:
                 logger.error(f"ETH/BTC 비율 업데이트 태스크 오류: {str(e)}")
                 await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
 
+    async def update_stablecoin_inflow_ratio(self):
+        """Stablecoin Inflow Ratio 업데이트"""
+        try:
+            # db 세션 생성
+            async with async_session() as session:
+                ratio_data = await indicator_service.get_stablecoin_inflow_ratio(session)
+                self.current_prices["stablecoin_inflow_ratio"] = ratio_data["ratio"]
+                logger.info(
+                    f"Stablecoin Inflow Ratio 업데이트: {self.current_prices['stablecoin_inflow_ratio']}"
+                )
+        except Exception as e:
+            logger.error(f"Stablecoin Inflow Ratio 업데이트 중 오류 발생: {str(e)}")
+
+    async def start_stablecoin_inflow_ratio_updates(self):
+        """Stablecoin Inflow Ratio 주기적 업데이트 (1시간마다)"""
+        while self.running:
+            try:
+                await self.update_stablecoin_inflow_ratio()
+                await asyncio.sleep(60 * 60)  # 1시간 대기
+            except Exception as e:
+                logger.error(f"Stablecoin Inflow Ratio 업데이트 태스크 오류: {str(e)}")
+                await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
+
     async def start(self):
         """스트리밍 서비스 시작"""
         try:
@@ -457,6 +481,7 @@ class PriceStreamService:
             await self.update_ma_cross()  # MA 크로스 초기값 설정
             await self.update_fear_greed()  # 공포/탐욕 지수 초기값 설정
             await self.update_eth_btc_ratio()  # ETH/BTC 비율 초기값 설정
+            await self.update_stablecoin_inflow_ratio()  # Stablecoin Inflow Ratio 초기값 설정
 
             # 기존 태스크들 시작
             asyncio.create_task(self.start_rsi_updates())
@@ -476,6 +501,9 @@ class PriceStreamService:
             asyncio.create_task(
                 self.start_eth_btc_ratio_updates()
             )  # ETH/BTC 비율 업데이트 태스크 추가
+            asyncio.create_task(
+                self.start_stablecoin_inflow_ratio_updates()
+            )  # Stablecoin Inflow Ratio 업데이트 태스크 추가
             asyncio.create_task(self.connect_upbit())
             asyncio.create_task(self.connect_binance())
 

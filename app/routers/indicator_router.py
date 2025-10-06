@@ -46,6 +46,11 @@ class FearGreedUpdate(BaseModel):
     classification: str = None  # 선택적 분류 필드
 
 
+# Stablecoin Inflow Ratio 업데이트를 위한 요청 모델
+class StablecoinInflowRatioUpdate(BaseModel):
+    value: float
+
+
 @router.get("/rsi")
 async def get_rsi(
     symbol: str = Query(DEFAULT_SYMBOL, description="암호화폐 심볼 (예: BTC)"),
@@ -367,3 +372,120 @@ async def get_eth_btc_ratio():
         }
     """
     return await indicator_service.get_eth_btc_ratio()
+
+
+@router.get("/stablecoin-inflow-ratio", response_model=Dict[str, Any])
+async def get_stablecoin_inflow_ratio(
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    현재 Stablecoin Exchange Inflow Ratio를 조회합니다.
+
+    Returns:
+        dict: {
+            "ratio": float,  # 스테이블코인 유입 비율 (%)
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    return await indicator_service.get_stablecoin_inflow_ratio(db)
+
+
+@router.post("/stablecoin-inflow-ratio", response_model=Dict[str, Any])
+async def create_stablecoin_inflow_ratio(
+    data: StablecoinInflowRatioUpdate,
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    새로운 Stablecoin Inflow Ratio 값을 생성합니다.
+
+    Args:
+        data (StablecoinInflowRatioUpdate): 생성할 데이터
+            - value (float): 스테이블코인 유입 비율 값
+
+    Returns:
+        dict: {
+            "ratio": float,  # 생성된 비율 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    try:
+        return await indicator_service.create_stablecoin_inflow_ratio(db, data.value)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/stablecoin-inflow-ratio", response_model=Dict[str, Any])
+async def update_stablecoin_inflow_ratio(
+    data: StablecoinInflowRatioUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    가장 최근 Stablecoin Inflow Ratio 값을 업데이트합니다. (관리자 전용)
+
+    Args:
+        data (StablecoinInflowRatioUpdate): 업데이트할 데이터
+            - value (float): 새로운 스테이블코인 유입 비율 값
+
+    Returns:
+        dict: {
+            "ratio": float,  # 업데이트된 비율 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "NOT_ADMIN", "message": "관리자만 접근할 수 있습니다"},
+        )
+
+    try:
+        result = await indicator_service.update_stablecoin_inflow_ratio(
+            db, data.value
+        )
+
+        # 스트림 서비스의 캐시 업데이트
+        stream_service.current_prices["stablecoin_inflow_ratio"] = result["ratio"]
+
+        logger.info(
+            f"Stablecoin Inflow Ratio updated by admin: {current_user.email}"
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to update Stablecoin Inflow Ratio: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "UPDATE_FAILED",
+                "message": "Stablecoin Inflow Ratio 업데이트에 실패했습니다",
+            },
+        )
+
+
+@router.delete("/stablecoin-inflow-ratio", response_model=Dict[str, Any])
+async def delete_stablecoin_inflow_ratio(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    가장 최근 Stablecoin Inflow Ratio 값을 삭제합니다. (관리자 전용)
+
+    Returns:
+        dict: {
+            "ratio": float,  # 삭제된 비율 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "NOT_ADMIN", "message": "관리자만 접근할 수 있습니다"},
+        )
+
+    try:
+        return await indicator_service.delete_latest_stablecoin_inflow_ratio(db)
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

@@ -25,7 +25,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.sql import desc
-from app.models import MVRVIndicator, FearGreedIndicator
+from app.models import MVRVIndicator, FearGreedIndicator, StablecoinInflowRatioIndicator
 
 logger = logging.getLogger(__name__)
 
@@ -435,6 +435,124 @@ class IndicatorService:
         except Exception as e:
             await db.rollback()
             logger.error(f"공포/탐욕 지수 삭제 중 오류 발생: {str(e)}")
+            raise
+
+    async def get_stablecoin_inflow_ratio(self, db: AsyncSession) -> Dict[str, Any]:
+        """Stablecoin Exchange Inflow Ratio 조회"""
+        try:
+            # DB에서 최신 Stablecoin Inflow Ratio 값 조회
+            query = (
+                select(StablecoinInflowRatioIndicator)
+                .order_by(desc(StablecoinInflowRatioIndicator.created_at))
+                .limit(1)
+            )
+            result = await db.execute(query)
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                return {
+                    "ratio": round(float(latest.value), 8),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+
+            # DB에 값이 없으면 기본값 반환
+            return {
+                "ratio": 0.0,
+                "timestamp": datetime.now().isoformat(),
+            }
+
+        except Exception as e:
+            logger.error(f"Stablecoin Inflow Ratio 조회 중 오류 발생: {str(e)}")
+            return {
+                "ratio": 0.0,
+                "timestamp": datetime.now().isoformat(),
+            }
+
+    async def create_stablecoin_inflow_ratio(
+        self, db: AsyncSession, value: float
+    ) -> Dict[str, Any]:
+        """새로운 Stablecoin Inflow Ratio 값을 생성합니다."""
+        try:
+            new_ratio = StablecoinInflowRatioIndicator(value=value)
+            db.add(new_ratio)
+            await db.commit()
+            await db.refresh(new_ratio)
+
+            return {
+                "ratio": round(float(new_ratio.value), 8),
+                "timestamp": new_ratio.created_at.isoformat(),
+            }
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Stablecoin Inflow Ratio 생성 중 오류 발생: {str(e)}")
+            raise
+
+    async def update_stablecoin_inflow_ratio(
+        self, db: AsyncSession, value: float
+    ) -> Dict[str, Any]:
+        """가장 최근 Stablecoin Inflow Ratio 값을 업데이트합니다."""
+        try:
+            # 가장 최근 Stablecoin Inflow Ratio 레코드 조회
+            query = (
+                select(StablecoinInflowRatioIndicator)
+                .order_by(desc(StablecoinInflowRatioIndicator.created_at))
+                .limit(1)
+            )
+            result = await db.execute(query)
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                # 기존 레코드 업데이트
+                latest.value = value
+                await db.commit()
+                await db.refresh(latest)
+
+                return {
+                    "ratio": round(float(latest.value), 8),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+            else:
+                # 레코드가 없으면 새로 생성
+                return await self.create_stablecoin_inflow_ratio(db, value)
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Stablecoin Inflow Ratio 업데이트 중 오류 발생: {str(e)}")
+            raise
+
+    async def delete_latest_stablecoin_inflow_ratio(
+        self, db: AsyncSession
+    ) -> Dict[str, Any]:
+        """가장 최근 Stablecoin Inflow Ratio 값을 삭제합니다."""
+        try:
+            # 가장 최근 Stablecoin Inflow Ratio 레코드 조회
+            query = (
+                select(StablecoinInflowRatioIndicator)
+                .order_by(desc(StablecoinInflowRatioIndicator.created_at))
+                .limit(1)
+            )
+            result = await db.execute(query)
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                # 삭제할 Stablecoin Inflow Ratio 정보 저장
+                deleted_info = {
+                    "ratio": round(float(latest.value), 8),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+                # 레코드 삭제
+                await db.delete(latest)
+                await db.commit()
+                return deleted_info
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail="삭제할 Stablecoin Inflow Ratio 레코드가 없습니다.",
+                )
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Stablecoin Inflow Ratio 삭제 중 오류 발생: {str(e)}")
             raise
 
 
