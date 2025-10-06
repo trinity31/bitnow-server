@@ -1,5 +1,5 @@
 import pandas as pd
-import pandas_ta as ta
+from ta.momentum import RSIIndicator
 import requests
 import os
 from typing import Dict, Optional, Any, List
@@ -63,8 +63,8 @@ class IndicatorService:
             df = pd.DataFrame(closes, columns=["close"])
 
             # RSI 계산
-            rsi = ta.rsi(df["close"], length=length)
-            current_rsi = rsi.iloc[-1]
+            rsi_indicator = RSIIndicator(close=df["close"], window=length)
+            current_rsi = rsi_indicator.rsi().iloc[-1]
 
             # RSI 값이 NaN인 경우 처리
             if pd.isna(current_rsi):
