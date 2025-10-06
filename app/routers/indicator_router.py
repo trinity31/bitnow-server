@@ -353,3 +353,17 @@ async def update_fear_greed_index(
                 "message": "공포/탐욕 지수 업데이트에 실패했습니다",
             },
         )
+
+
+@router.get("/eth-btc-ratio", response_model=Dict[str, Any])
+async def get_eth_btc_ratio():
+    """
+    현재 ETH/BTC 비율을 조회합니다.
+
+    Returns:
+        dict: {
+            "ratio": float,  # ETH/BTC 비율 (소수점 6자리)
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    return await indicator_service.get_eth_btc_ratio()

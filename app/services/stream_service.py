@@ -59,6 +59,7 @@ class PriceStreamService:
                 "classification": "neutral",
                 "timestamp": "",
             },
+            "eth_btc_ratio": 0.0,  # ETH/BTC 비율 추가
         }
         self.prev_prices: Dict[str, Any] = {"krw": 0.0, "usd": 0.0, "timestamp": ""}
         # 시간 간격별 마지막 갱신 시간
@@ -413,6 +414,15 @@ class PriceStreamService:
         except Exception as e:
             logger.error(f"공포/탐욕 지수 업데이트 중 오류 발생: {str(e)}")
 
+    async def update_eth_btc_ratio(self):
+        """ETH/BTC 비율 업데이트"""
+        try:
+            ratio_data = await indicator_service.get_eth_btc_ratio()
+            self.current_prices["eth_btc_ratio"] = ratio_data["ratio"]
+            logger.info(f"ETH/BTC 비율 업데이트: {self.current_prices['eth_btc_ratio']}")
+        except Exception as e:
+            logger.error(f"ETH/BTC 비율 업데이트 중 오류 발생: {str(e)}")
+
     async def start_fear_greed_updates(self):
         """공포/탐욕 지수 주기적 업데이트 (24시간마다)"""
         while self.running:
@@ -421,6 +431,16 @@ class PriceStreamService:
                 await asyncio.sleep(24 * 60 * 60)  # 24시간 대기
             except Exception as e:
                 logger.error(f"공포/탐욕 지수 업데이트 태스크 오류: {str(e)}")
+                await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
+
+    async def start_eth_btc_ratio_updates(self):
+        """ETH/BTC 비율 주기적 업데이트 (1분마다)"""
+        while self.running:
+            try:
+                await self.update_eth_btc_ratio()
+                await asyncio.sleep(60)  # 1분 대기
+            except Exception as e:
+                logger.error(f"ETH/BTC 비율 업데이트 태스크 오류: {str(e)}")
                 await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
 
     async def start(self):
@@ -436,6 +456,7 @@ class PriceStreamService:
             await self.update_3w_high()
             await self.update_ma_cross()  # MA 크로스 초기값 설정
             await self.update_fear_greed()  # 공포/탐욕 지수 초기값 설정
+            await self.update_eth_btc_ratio()  # ETH/BTC 비율 초기값 설정
 
             # 기존 태스크들 시작
             asyncio.create_task(self.start_rsi_updates())
@@ -452,6 +473,9 @@ class PriceStreamService:
             asyncio.create_task(
                 self.start_fear_greed_updates()
             )  # 공포/탐욕 지수 업데이트 태스크 추가
+            asyncio.create_task(
+                self.start_eth_btc_ratio_updates()
+            )  # ETH/BTC 비율 업데이트 태스크 추가
             asyncio.create_task(self.connect_upbit())
             asyncio.create_task(self.connect_binance())
 

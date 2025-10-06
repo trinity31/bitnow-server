@@ -299,6 +299,59 @@ class IndicatorService:
         else:
             return "extreme_greed"
 
+    async def get_eth_btc_ratio(self) -> Dict[str, Any]:
+        """ETH/BTC 비율 조회"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                # ETHUSDT 가격 조회
+                eth_url = "https://api.binance.com/api/v3/ticker/price"
+                eth_params = {"symbol": "ETHUSDT"}
+                async with session.get(eth_url, params=eth_params) as response:
+                    if response.status == 200:
+                        eth_data = await response.json()
+                        eth_price = float(eth_data["price"])
+                    else:
+                        logger.warning("바이낸스 ETHUSDT 가격 조회 실패")
+                        return {
+                            "ratio": 0.0,
+                            "timestamp": datetime.now().isoformat(),
+                        }
+
+                # BTCUSDT 가격 조회
+                btc_url = "https://api.binance.com/api/v3/ticker/price"
+                btc_params = {"symbol": "BTCUSDT"}
+                async with session.get(btc_url, params=btc_params) as response:
+                    if response.status == 200:
+                        btc_data = await response.json()
+                        btc_price = float(btc_data["price"])
+                    else:
+                        logger.warning("바이낸스 BTCUSDT 가격 조회 실패")
+                        return {
+                            "ratio": 0.0,
+                            "timestamp": datetime.now().isoformat(),
+                        }
+
+                # ETH/BTC 비율 계산
+                if btc_price > 0:
+                    ratio = eth_price / btc_price
+                    return {
+                        "ratio": round(ratio, 6),
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                else:
+                    logger.error("BTC 가격이 0입니다")
+                    return {
+                        "ratio": 0.0,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+
+        except Exception as e:
+            logger.error(f"ETH/BTC 비율 조회 중 오류 발생: {str(e)}")
+            return {
+                "ratio": 0.0,
+                "timestamp": datetime.now().isoformat(),
+            }
+
     async def create_fear_greed(self, db: AsyncSession, value: int) -> Dict[str, Any]:
         """새로운 공포/탐욕 지수 값을 생성합니다."""
         try:
