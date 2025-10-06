@@ -25,7 +25,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.sql import desc
-from app.models import MVRVIndicator, FearGreedIndicator, StablecoinInflowRatioIndicator
+from app.models import MVRVIndicator, FearGreedIndicator, StablecoinInflowRatioIndicator, NUPLIndicator, SPORIndicator
 
 logger = logging.getLogger(__name__)
 
@@ -553,6 +553,184 @@ class IndicatorService:
         except Exception as e:
             await db.rollback()
             logger.error(f"Stablecoin Inflow Ratio 삭제 중 오류 발생: {str(e)}")
+            raise
+
+    async def get_nupl(self, db: AsyncSession) -> Dict[str, Any]:
+        """NUPL 최신 값 조회 (DB)"""
+        try:
+            result = await db.execute(
+                select(NUPLIndicator).order_by(NUPLIndicator.created_at.desc()).limit(1)
+            )
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                return {
+                    "nupl": round(float(latest.value), 8),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+            else:
+                return {
+                    "nupl": 0.0,
+                    "timestamp": datetime.now().isoformat(),
+                }
+
+        except Exception as e:
+            logger.error(f"NUPL 조회 중 오류 발생: {str(e)}")
+            return {
+                "nupl": 0.0,
+                "timestamp": datetime.now().isoformat(),
+            }
+
+    async def create_nupl(self, db: AsyncSession, value: float) -> Dict[str, Any]:
+        """NUPL 값 생성 (관리자 전용)"""
+        try:
+            new_indicator = NUPLIndicator(value=value)
+            db.add(new_indicator)
+            await db.commit()
+            await db.refresh(new_indicator)
+
+            return {
+                "nupl": round(float(new_indicator.value), 8),
+                "timestamp": new_indicator.created_at.isoformat(),
+            }
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"NUPL 생성 중 오류 발생: {str(e)}")
+            raise
+
+    async def update_nupl(self, db: AsyncSession, value: float) -> Dict[str, Any]:
+        """NUPL 최신 값 업데이트 (관리자 전용)"""
+        try:
+            result = await db.execute(
+                select(NUPLIndicator).order_by(NUPLIndicator.created_at.desc()).limit(1)
+            )
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                latest.value = value
+                latest.created_at = datetime.now()
+                await db.commit()
+                await db.refresh(latest)
+
+                return {
+                    "nupl": round(float(latest.value), 8),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+            else:
+                return await self.create_nupl(db, value)
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"NUPL 업데이트 중 오류 발생: {str(e)}")
+            raise
+
+    async def delete_nupl(self, db: AsyncSession) -> bool:
+        """NUPL 최신 값 삭제 (관리자 전용)"""
+        try:
+            result = await db.execute(
+                select(NUPLIndicator).order_by(NUPLIndicator.created_at.desc()).limit(1)
+            )
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                await db.delete(latest)
+                await db.commit()
+                return True
+            else:
+                return False
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"NUPL 삭제 중 오류 발생: {str(e)}")
+            raise
+
+    async def get_spor(self, db: AsyncSession) -> Dict[str, Any]:
+        """SPOR 최신 값 조회 (DB)"""
+        try:
+            result = await db.execute(
+                select(SPORIndicator).order_by(SPORIndicator.created_at.desc()).limit(1)
+            )
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                return {
+                    "spor": round(float(latest.value), 8),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+            else:
+                return {
+                    "spor": 0.0,
+                    "timestamp": datetime.now().isoformat(),
+                }
+
+        except Exception as e:
+            logger.error(f"SPOR 조회 중 오류 발생: {str(e)}")
+            return {
+                "spor": 0.0,
+                "timestamp": datetime.now().isoformat(),
+            }
+
+    async def create_spor(self, db: AsyncSession, value: float) -> Dict[str, Any]:
+        """SPOR 값 생성 (관리자 전용)"""
+        try:
+            new_indicator = SPORIndicator(value=value)
+            db.add(new_indicator)
+            await db.commit()
+            await db.refresh(new_indicator)
+
+            return {
+                "spor": round(float(new_indicator.value), 8),
+                "timestamp": new_indicator.created_at.isoformat(),
+            }
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"SPOR 생성 중 오류 발생: {str(e)}")
+            raise
+
+    async def update_spor(self, db: AsyncSession, value: float) -> Dict[str, Any]:
+        """SPOR 최신 값 업데이트 (관리자 전용)"""
+        try:
+            result = await db.execute(
+                select(SPORIndicator).order_by(SPORIndicator.created_at.desc()).limit(1)
+            )
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                latest.value = value
+                latest.created_at = datetime.now()
+                await db.commit()
+                await db.refresh(latest)
+
+                return {
+                    "spor": round(float(latest.value), 8),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+            else:
+                return await self.create_spor(db, value)
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"SPOR 업데이트 중 오류 발생: {str(e)}")
+            raise
+
+    async def delete_spor(self, db: AsyncSession) -> bool:
+        """SPOR 최신 값 삭제 (관리자 전용)"""
+        try:
+            result = await db.execute(
+                select(SPORIndicator).order_by(SPORIndicator.created_at.desc()).limit(1)
+            )
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                await db.delete(latest)
+                await db.commit()
+                return True
+            else:
+                return False
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"SPOR 삭제 중 오류 발생: {str(e)}")
             raise
 
 

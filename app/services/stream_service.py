@@ -61,6 +61,8 @@ class PriceStreamService:
             },
             "eth_btc_ratio": 0.0,  # ETH/BTC 비율 추가
             "stablecoin_inflow_ratio": 0.0,  # 스테이블코인 유입 비율 추가
+            "nupl": 0.0,  # NUPL(Net Unrealized Profit/Loss) 추가
+            "spor": 0.0,  # SPOR(Spent Output Profit Ratio) 추가
         }
         self.prev_prices: Dict[str, Any] = {"krw": 0.0, "usd": 0.0, "timestamp": ""}
         # 시간 간격별 마지막 갱신 시간
@@ -467,6 +469,46 @@ class PriceStreamService:
                 logger.error(f"Stablecoin Inflow Ratio 업데이트 태스크 오류: {str(e)}")
                 await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
 
+    async def update_nupl(self):
+        """NUPL 업데이트"""
+        try:
+            async with async_session() as db:
+                nupl_data = await indicator_service.get_nupl(db)
+                self.current_prices["nupl"] = nupl_data["nupl"]
+                logger.info(f"NUPL 업데이트: {self.current_prices['nupl']}")
+        except Exception as e:
+            logger.error(f"NUPL 업데이트 중 오류 발생: {str(e)}")
+
+    async def start_nupl_updates(self):
+        """NUPL 주기적 업데이트 (1시간마다)"""
+        while self.running:
+            try:
+                await self.update_nupl()
+                await asyncio.sleep(60 * 60)  # 1시간 대기
+            except Exception as e:
+                logger.error(f"NUPL 업데이트 태스크 오류: {str(e)}")
+                await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
+
+    async def update_spor(self):
+        """SPOR 업데이트"""
+        try:
+            async with async_session() as db:
+                spor_data = await indicator_service.get_spor(db)
+                self.current_prices["spor"] = spor_data["spor"]
+                logger.info(f"SPOR 업데이트: {self.current_prices['spor']}")
+        except Exception as e:
+            logger.error(f"SPOR 업데이트 중 오류 발생: {str(e)}")
+
+    async def start_spor_updates(self):
+        """SPOR 주기적 업데이트 (1시간마다)"""
+        while self.running:
+            try:
+                await self.update_spor()
+                await asyncio.sleep(60 * 60)  # 1시간 대기
+            except Exception as e:
+                logger.error(f"SPOR 업데이트 태스크 오류: {str(e)}")
+                await asyncio.sleep(60)  # 오류 발생시 1분 후 재시도
+
     async def start(self):
         """스트리밍 서비스 시작"""
         try:
@@ -482,6 +524,8 @@ class PriceStreamService:
             await self.update_fear_greed()  # 공포/탐욕 지수 초기값 설정
             await self.update_eth_btc_ratio()  # ETH/BTC 비율 초기값 설정
             await self.update_stablecoin_inflow_ratio()  # Stablecoin Inflow Ratio 초기값 설정
+            await self.update_nupl()  # NUPL 초기값 설정
+            await self.update_spor()  # SPOR 초기값 설정
 
             # 기존 태스크들 시작
             asyncio.create_task(self.start_rsi_updates())
@@ -504,6 +548,8 @@ class PriceStreamService:
             asyncio.create_task(
                 self.start_stablecoin_inflow_ratio_updates()
             )  # Stablecoin Inflow Ratio 업데이트 태스크 추가
+            asyncio.create_task(self.start_nupl_updates())  # NUPL 업데이트 태스크 추가
+            asyncio.create_task(self.start_spor_updates())  # SPOR 업데이트 태스크 추가
             asyncio.create_task(self.connect_upbit())
             asyncio.create_task(self.connect_binance())
 

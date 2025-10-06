@@ -51,6 +51,14 @@ class StablecoinInflowRatioUpdate(BaseModel):
     value: float
 
 
+class NUPLUpdate(BaseModel):
+    value: float
+
+
+class SPORUpdate(BaseModel):
+    value: float
+
+
 @router.get("/rsi")
 async def get_rsi(
     symbol: str = Query(DEFAULT_SYMBOL, description="암호화폐 심볼 (예: BTC)"),
@@ -372,6 +380,244 @@ async def get_eth_btc_ratio():
         }
     """
     return await indicator_service.get_eth_btc_ratio()
+
+
+@router.get("/nupl", response_model=Dict[str, Any])
+async def get_nupl(
+    db: AsyncSession = Depends(get_session),
+):
+    """
+    현재 NUPL(Net Unrealized Profit/Loss) 값을 조회합니다.
+
+    Returns:
+        dict: {
+            "nupl": float,  # NUPL 값 (-1.0 ~ 1.0)
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    return await indicator_service.get_nupl(db)
+
+
+@router.post("/nupl", response_model=Dict[str, Any])
+async def create_nupl(
+    data: NUPLUpdate,
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    새로운 NUPL 값을 생성합니다.
+
+    Args:
+        data (NUPLUpdate): 생성할 데이터
+            - value (float): NUPL 값
+
+    Returns:
+        dict: {
+            "nupl": float,  # 생성된 NUPL 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    try:
+        return await indicator_service.create_nupl(db, data.value)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/nupl", response_model=Dict[str, Any])
+async def update_nupl(
+    data: NUPLUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    가장 최근 NUPL 값을 업데이트합니다. (관리자 전용)
+
+    Args:
+        data (NUPLUpdate): 업데이트할 데이터
+            - value (float): 새로운 NUPL 값
+
+    Returns:
+        dict: {
+            "nupl": float,  # 업데이트된 NUPL 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "NOT_ADMIN", "message": "관리자만 접근할 수 있습니다"},
+        )
+
+    try:
+        result = await indicator_service.update_nupl(db, data.value)
+
+        # 스트림 서비스의 캐시 업데이트
+        stream_service.current_prices["nupl"] = result["nupl"]
+
+        logger.info(f"NUPL updated by admin: {current_user.email}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to update NUPL: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "UPDATE_FAILED",
+                "message": "NUPL 업데이트에 실패했습니다",
+            },
+        )
+
+
+@router.delete("/nupl", response_model=Dict[str, Any])
+async def delete_nupl(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    가장 최근 NUPL 값을 삭제합니다. (관리자 전용)
+
+    Returns:
+        dict: {
+            "success": bool,  # 삭제 성공 여부
+        }
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "NOT_ADMIN", "message": "관리자만 접근할 수 있습니다"},
+        )
+
+    try:
+        success = await indicator_service.delete_nupl(db)
+        if success:
+            return {"success": True}
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "NOT_FOUND", "message": "삭제할 NUPL 데이터가 없습니다"},
+            )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/spor", response_model=Dict[str, Any])
+async def get_spor(
+    db: AsyncSession = Depends(get_session),
+):
+    """
+    현재 SPOR(Spent Output Profit Ratio) 값을 조회합니다.
+
+    Returns:
+        dict: {
+            "spor": float,  # SPOR 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    return await indicator_service.get_spor(db)
+
+
+@router.post("/spor", response_model=Dict[str, Any])
+async def create_spor(
+    data: SPORUpdate,
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    새로운 SPOR 값을 생성합니다.
+
+    Args:
+        data (SPORUpdate): 생성할 데이터
+            - value (float): SPOR 값
+
+    Returns:
+        dict: {
+            "spor": float,  # 생성된 SPOR 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    try:
+        return await indicator_service.create_spor(db, data.value)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/spor", response_model=Dict[str, Any])
+async def update_spor(
+    data: SPORUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    가장 최근 SPOR 값을 업데이트합니다. (관리자 전용)
+
+    Args:
+        data (SPORUpdate): 업데이트할 데이터
+            - value (float): 새로운 SPOR 값
+
+    Returns:
+        dict: {
+            "spor": float,  # 업데이트된 SPOR 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "NOT_ADMIN", "message": "관리자만 접근할 수 있습니다"},
+        )
+
+    try:
+        result = await indicator_service.update_spor(db, data.value)
+
+        # 스트림 서비스의 캐시 업데이트
+        stream_service.current_prices["spor"] = result["spor"]
+
+        logger.info(f"SPOR updated by admin: {current_user.email}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to update SPOR: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "UPDATE_FAILED",
+                "message": "SPOR 업데이트에 실패했습니다",
+            },
+        )
+
+
+@router.delete("/spor", response_model=Dict[str, Any])
+async def delete_spor(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    가장 최근 SPOR 값을 삭제합니다. (관리자 전용)
+
+    Returns:
+        dict: {
+            "success": bool,  # 삭제 성공 여부
+        }
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "NOT_ADMIN", "message": "관리자만 접근할 수 있습니다"},
+        )
+
+    try:
+        success = await indicator_service.delete_spor(db)
+        if success:
+            return {"success": True}
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "NOT_FOUND", "message": "삭제할 SPOR 데이터가 없습니다"},
+            )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/stablecoin-inflow-ratio", response_model=Dict[str, Any])

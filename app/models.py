@@ -102,3 +102,25 @@ class StablecoinInflowRatioIndicator(Base):
 
     def __repr__(self):
         return f"<StablecoinInflowRatioIndicator(id={self.id}, value={self.value}, created_at={self.created_at})>"
+
+
+class NUPLIndicator(Base):
+    __tablename__ = "nupl_indicators"
+
+    id = Column(Integer, primary_key=True, index=True)
+    value = Column(Float, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+
+    def __repr__(self):
+        return f"<NUPLIndicator(id={self.id}, value={self.value}, created_at={self.created_at})>"
+
+
+class SPORIndicator(Base):
+    __tablename__ = "spor_indicators"
+
+    id = Column(Integer, primary_key=True, index=True)
+    value = Column(Float, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+
+    def __repr__(self):
+        return f"<SPORIndicator(id={self.id}, value={self.value}, created_at={self.created_at})>"
