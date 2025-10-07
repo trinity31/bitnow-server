@@ -59,6 +59,14 @@ class SPORUpdate(BaseModel):
     value: float
 
 
+# 일괄 지표 업데이트를 위한 요청 모델
+class BulkIndicatorsUpdate(BaseModel):
+    stablecoin_inflow_ratio: Optional[float] = None
+    nupl: Optional[float] = None
+    spor: Optional[float] = None
+    mvrv: Optional[float] = None
+
+
 @router.get("/rsi")
 async def get_rsi(
     symbol: str = Query(DEFAULT_SYMBOL, description="암호화폐 심볼 (예: BTC)"),
@@ -735,3 +743,87 @@ async def delete_stablecoin_inflow_ratio(
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/bulk", response_model=Dict[str, Any])
+async def create_bulk_indicators(
+    data: BulkIndicatorsUpdate,
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    4개 지표(Stablecoin Inflow Ratio, NUPL, SPOR, MVRV)를 한 번에 생성합니다.
+
+    Args:
+        data (BulkIndicatorsUpdate): 생성할 지표 데이터
+            - stablecoin_inflow_ratio (float, optional): 스테이블코인 유입 비율
+            - nupl (float, optional): NUPL 값
+            - spor (float, optional): SPOR 값
+            - mvrv (float, optional): MVRV 값
+
+    Returns:
+        dict: {
+            "success": bool,  # 전체 성공 여부
+            "results": {
+                "stablecoin_inflow_ratio": {"success": bool, "value": float, "timestamp": str},
+                "nupl": {"success": bool, "value": float, "timestamp": str},
+                "spor": {"success": bool, "value": float, "timestamp": str},
+                "mvrv": {"success": bool, "value": float, "timestamp": str}
+            }
+        }
+
+    Examples:
+        # 모든 지표 업데이트
+        {
+            "stablecoin_inflow_ratio": 0.75,
+            "nupl": 0.45,
+            "spor": 0.68,
+            "mvrv": 1.5
+        }
+
+        # 일부 지표만 업데이트
+        {
+            "mvrv": 1.5,
+            "nupl": 0.45
+        }
+    """
+    try:
+        # 최소 1개 이상의 지표 값이 제공되었는지 확인
+        if all(
+            value is None
+            for value in [
+                data.stablecoin_inflow_ratio,
+                data.nupl,
+                data.spor,
+                data.mvrv,
+            ]
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "NO_DATA",
+                    "message": "최소 1개 이상의 지표 값을 제공해야 합니다",
+                },
+            )
+
+        result = await indicator_service.create_bulk_indicators(
+            db=db,
+            stablecoin_inflow_ratio=data.stablecoin_inflow_ratio,
+            nupl=data.nupl,
+            spor=data.spor,
+            mvrv=data.mvrv,
+        )
+
+        logger.info(f"Bulk indicators created: {result}")
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create bulk indicators: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "BULK_CREATE_FAILED",
+                "message": "지표 일괄 생성에 실패했습니다",
+            },
+        )

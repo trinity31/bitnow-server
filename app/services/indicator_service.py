@@ -733,6 +733,103 @@ class IndicatorService:
             logger.error(f"SPOR 삭제 중 오류 발생: {str(e)}")
             raise
 
+    async def create_bulk_indicators(
+        self,
+        db: AsyncSession,
+        stablecoin_inflow_ratio: Optional[float] = None,
+        nupl: Optional[float] = None,
+        spor: Optional[float] = None,
+        mvrv: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        4개 지표를 한 번에 생성합니다.
+
+        Args:
+            db: 데이터베이스 세션
+            stablecoin_inflow_ratio: 스테이블코인 유입 비율
+            nupl: NUPL 값
+            spor: SPOR 값
+            mvrv: MVRV 값
+
+        Returns:
+            각 지표별 생성 결과
+        """
+        results = {}
+
+        # Stablecoin Inflow Ratio
+        if stablecoin_inflow_ratio is not None:
+            try:
+                result = await self.create_stablecoin_inflow_ratio(db, stablecoin_inflow_ratio)
+                results["stablecoin_inflow_ratio"] = {
+                    "success": True,
+                    "value": result["ratio"],
+                    "timestamp": result["timestamp"],
+                }
+            except Exception as e:
+                logger.error(f"Stablecoin Inflow Ratio 생성 실패: {str(e)}")
+                results["stablecoin_inflow_ratio"] = {
+                    "success": False,
+                    "error": str(e),
+                }
+
+        # NUPL
+        if nupl is not None:
+            try:
+                result = await self.create_nupl(db, nupl)
+                results["nupl"] = {
+                    "success": True,
+                    "value": result["nupl"],
+                    "timestamp": result["timestamp"],
+                }
+            except Exception as e:
+                logger.error(f"NUPL 생성 실패: {str(e)}")
+                results["nupl"] = {
+                    "success": False,
+                    "error": str(e),
+                }
+
+        # SPOR
+        if spor is not None:
+            try:
+                result = await self.create_spor(db, spor)
+                results["spor"] = {
+                    "success": True,
+                    "value": result["spor"],
+                    "timestamp": result["timestamp"],
+                }
+            except Exception as e:
+                logger.error(f"SPOR 생성 실패: {str(e)}")
+                results["spor"] = {
+                    "success": False,
+                    "error": str(e),
+                }
+
+        # MVRV
+        if mvrv is not None:
+            try:
+                result = await self.create_mvrv(db, mvrv)
+                results["mvrv"] = {
+                    "success": True,
+                    "value": result["mvrv"],
+                    "timestamp": result["timestamp"],
+                }
+            except Exception as e:
+                logger.error(f"MVRV 생성 실패: {str(e)}")
+                results["mvrv"] = {
+                    "success": False,
+                    "error": str(e),
+                }
+
+        # 전체 성공 여부 판단
+        all_success = all(
+            result.get("success", False) for result in results.values()
+        )
+
+        return {
+            "success": all_success,
+            "results": results,
+        }
+
 
 # 싱글톤 인스턴스 생성
 indicator_service = IndicatorService()
