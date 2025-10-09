@@ -17,10 +17,16 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 
 def verify_password(plain_password, hashed_password):
+    # bcrypt는 72바이트까지만 지원하므로 잘라서 사용
+    if isinstance(plain_password, str):
+        plain_password = plain_password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
     return pwd_context.verify(plain_password, hashed_password)
 
 
 def get_password_hash(password):
+    # bcrypt는 72바이트까지만 지원하므로 잘라서 사용
+    if isinstance(password, str):
+        password = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
     return pwd_context.hash(password)
 
 
