@@ -71,20 +71,32 @@ async def register(user_data: UserCreate, session: AsyncSession = Depends(get_se
         result = await session.execute(select(func.count(User.id)))
         total_users = result.scalar()
 
-        # 슬랙 메시지 전송
-        await slack_service.send_message(
-            f"새로운 회원이 가입했습니다. 현재 총 가입자는 {total_users}명 입니다."
-        )
+        # 슬랙 메시지 전송 (실패해도 회원가입은 성공)
+        try:
+            await slack_service.send_message(
+                f"새로운 회원이 가입했습니다. 현재 총 가입자는 {total_users}명 입니다."
+            )
+        except Exception as slack_error:
+            logger.warning(f"Slack notification failed: {str(slack_error)}")
 
         return {"message": "User created successfully"}
 
-    except ValidationError:
+    except ValidationError as ve:
+        logger.error(f"Validation error during registration: {str(ve)}")
         return JSONResponse(
             status_code=400,
             content={"code": "INVALID_INPUT", "message": "잘못된 입력입니다"},
         )
+    except IntegrityError as ie:
+        await session.rollback()
+        logger.error(f"Database integrity error during registration: {str(ie)}")
+        return JSONResponse(
+            status_code=400,
+            content={"code": "EMAIL_EXISTS", "message": "이미 등록된 이메일입니다"},
+        )
     except Exception as e:
-        logger.error(f"User registration failed: {str(e)}")
+        await session.rollback()
+        logger.error(f"User registration failed: {str(e)}", exc_info=True)
         return JSONResponse(
             status_code=500,
             content={"code": "SERVER_ERROR", "message": "서버 오류가 발생했습니다"},
@@ -164,7 +176,7 @@ async def login_json(
     except HTTPException as e:
         raise e
     except Exception as e:
-        logger.error(f"로그인 중 오류 발생: {str(e)}")
+        logger.error(f"로그인 중 오류 발생: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="서버 오류가 발생했습니다")
 
 
