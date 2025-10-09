@@ -59,12 +59,17 @@ class SPORUpdate(BaseModel):
     value: float
 
 
+class ASOLUpdate(BaseModel):
+    value: float
+
+
 # 일괄 지표 업데이트를 위한 요청 모델
 class BulkIndicatorsUpdate(BaseModel):
     stablecoin_inflow_ratio: Optional[float] = None
     nupl: Optional[float] = None
     spor: Optional[float] = None
     mvrv: Optional[float] = None
+    asol: Optional[float] = None
 
 
 @router.get("/rsi")
@@ -745,13 +750,132 @@ async def delete_stablecoin_inflow_ratio(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/asol", response_model=Dict[str, Any])
+async def get_asol(
+    db: AsyncSession = Depends(get_session),
+):
+    """
+    현재 ASOL(All Spent Output Lifespan) 값을 조회합니다.
+
+    Returns:
+        dict: {
+            "asol": float,  # ASOL 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    return await indicator_service.get_asol(db)
+
+
+@router.post("/asol", response_model=Dict[str, Any])
+async def create_asol(
+    data: ASOLUpdate,
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    새로운 ASOL 값을 생성합니다.
+
+    Args:
+        data (ASOLUpdate): 생성할 데이터
+            - value (float): ASOL 값
+
+    Returns:
+        dict: {
+            "asol": float,  # 생성된 ASOL 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    try:
+        return await indicator_service.create_asol(db, data.value)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/asol", response_model=Dict[str, Any])
+async def update_asol(
+    data: ASOLUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    가장 최근 ASOL 값을 업데이트합니다. (관리자 전용)
+
+    Args:
+        data (ASOLUpdate): 업데이트할 데이터
+            - value (float): 새로운 ASOL 값
+
+    Returns:
+        dict: {
+            "asol": float,  # 업데이트된 ASOL 값
+            "timestamp": str  # 타임스탬프 (ISO 형식)
+        }
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "NOT_ADMIN", "message": "관리자만 접근할 수 있습니다"},
+        )
+
+    try:
+        result = await indicator_service.update_asol(db, data.value)
+
+        # 스트림 서비스의 캐시 업데이트
+        stream_service.current_prices["asol"] = result["asol"]
+
+        logger.info(f"ASOL updated by admin: {current_user.email}")
+        return result
+
+    except Exception as e:
+        logger.error(f"Failed to update ASOL: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "code": "UPDATE_FAILED",
+                "message": "ASOL 업데이트에 실패했습니다",
+            },
+        )
+
+
+@router.delete("/asol", response_model=Dict[str, Any])
+async def delete_asol(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+) -> Dict[str, Any]:
+    """
+    가장 최근 ASOL 값을 삭제합니다. (관리자 전용)
+
+    Returns:
+        dict: {
+            "success": bool,  # 삭제 성공 여부
+        }
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "NOT_ADMIN", "message": "관리자만 접근할 수 있습니다"},
+        )
+
+    try:
+        success = await indicator_service.delete_asol(db)
+        if success:
+            return {"success": True}
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "NOT_FOUND", "message": "삭제할 ASOL 데이터가 없습니다"},
+            )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/bulk", response_model=Dict[str, Any])
 async def create_bulk_indicators(
     data: BulkIndicatorsUpdate,
     db: AsyncSession = Depends(get_session),
 ) -> Dict[str, Any]:
     """
-    4개 지표(Stablecoin Inflow Ratio, NUPL, SPOR, MVRV)를 한 번에 생성합니다.
+    5개 지표(Stablecoin Inflow Ratio, NUPL, SPOR, MVRV, ASOL)를 한 번에 생성합니다.
 
     Args:
         data (BulkIndicatorsUpdate): 생성할 지표 데이터
@@ -759,6 +883,7 @@ async def create_bulk_indicators(
             - nupl (float, optional): NUPL 값
             - spor (float, optional): SPOR 값
             - mvrv (float, optional): MVRV 값
+            - asol (float, optional): ASOL 값
 
     Returns:
         dict: {
@@ -767,7 +892,8 @@ async def create_bulk_indicators(
                 "stablecoin_inflow_ratio": {"success": bool, "value": float, "timestamp": str},
                 "nupl": {"success": bool, "value": float, "timestamp": str},
                 "spor": {"success": bool, "value": float, "timestamp": str},
-                "mvrv": {"success": bool, "value": float, "timestamp": str}
+                "mvrv": {"success": bool, "value": float, "timestamp": str},
+                "asol": {"success": bool, "value": float, "timestamp": str}
             }
         }
 
@@ -777,13 +903,15 @@ async def create_bulk_indicators(
             "stablecoin_inflow_ratio": 0.75,
             "nupl": 0.45,
             "spor": 0.68,
-            "mvrv": 1.5
+            "mvrv": 1.5,
+            "asol": 150.5
         }
 
         # 일부 지표만 업데이트
         {
             "mvrv": 1.5,
-            "nupl": 0.45
+            "nupl": 0.45,
+            "asol": 150.5
         }
     """
     try:
@@ -795,6 +923,7 @@ async def create_bulk_indicators(
                 data.nupl,
                 data.spor,
                 data.mvrv,
+                data.asol,
             ]
         ):
             raise HTTPException(
@@ -811,6 +940,7 @@ async def create_bulk_indicators(
             nupl=data.nupl,
             spor=data.spor,
             mvrv=data.mvrv,
+            asol=data.asol,
         )
 
         logger.info(f"Bulk indicators created: {result}")

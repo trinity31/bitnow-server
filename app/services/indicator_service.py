@@ -25,7 +25,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.sql import desc
-from app.models import MVRVIndicator, FearGreedIndicator, StablecoinInflowRatioIndicator, NUPLIndicator, SPORIndicator
+from app.models import MVRVIndicator, FearGreedIndicator, StablecoinInflowRatioIndicator, NUPLIndicator, SPORIndicator, ASOLIndicator
 
 logger = logging.getLogger(__name__)
 
@@ -733,6 +733,95 @@ class IndicatorService:
             logger.error(f"SPOR 삭제 중 오류 발생: {str(e)}")
             raise
 
+    async def get_asol(self, db: AsyncSession) -> Dict[str, Any]:
+        """ASOL 최신 값 조회 (DB)"""
+        try:
+            result = await db.execute(
+                select(ASOLIndicator).order_by(ASOLIndicator.created_at.desc()).limit(1)
+            )
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                return {
+                    "asol": round(float(latest.value), 8),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+            else:
+                return {
+                    "asol": 0.0,
+                    "timestamp": datetime.now().isoformat(),
+                }
+
+        except Exception as e:
+            logger.error(f"ASOL 조회 중 오류 발생: {str(e)}")
+            return {
+                "asol": 0.0,
+                "timestamp": datetime.now().isoformat(),
+            }
+
+    async def create_asol(self, db: AsyncSession, value: float) -> Dict[str, Any]:
+        """ASOL 값 생성 (관리자 전용)"""
+        try:
+            new_indicator = ASOLIndicator(value=value)
+            db.add(new_indicator)
+            await db.commit()
+            await db.refresh(new_indicator)
+
+            return {
+                "asol": round(float(new_indicator.value), 8),
+                "timestamp": new_indicator.created_at.isoformat(),
+            }
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"ASOL 생성 중 오류 발생: {str(e)}")
+            raise
+
+    async def update_asol(self, db: AsyncSession, value: float) -> Dict[str, Any]:
+        """ASOL 최신 값 업데이트 (관리자 전용)"""
+        try:
+            result = await db.execute(
+                select(ASOLIndicator).order_by(ASOLIndicator.created_at.desc()).limit(1)
+            )
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                latest.value = value
+                latest.created_at = datetime.now()
+                await db.commit()
+                await db.refresh(latest)
+
+                return {
+                    "asol": round(float(latest.value), 8),
+                    "timestamp": latest.created_at.isoformat(),
+                }
+            else:
+                return await self.create_asol(db, value)
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"ASOL 업데이트 중 오류 발생: {str(e)}")
+            raise
+
+    async def delete_asol(self, db: AsyncSession) -> bool:
+        """ASOL 최신 값 삭제 (관리자 전용)"""
+        try:
+            result = await db.execute(
+                select(ASOLIndicator).order_by(ASOLIndicator.created_at.desc()).limit(1)
+            )
+            latest = result.scalar_one_or_none()
+
+            if latest:
+                await db.delete(latest)
+                await db.commit()
+                return True
+            else:
+                return False
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"ASOL 삭제 중 오류 발생: {str(e)}")
+            raise
+
     async def create_bulk_indicators(
         self,
         db: AsyncSession,
@@ -740,9 +829,10 @@ class IndicatorService:
         nupl: Optional[float] = None,
         spor: Optional[float] = None,
         mvrv: Optional[float] = None,
+        asol: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
-        4개 지표를 한 번에 생성합니다.
+        5개 지표를 한 번에 생성합니다.
 
         Args:
             db: 데이터베이스 세션
@@ -750,6 +840,7 @@ class IndicatorService:
             nupl: NUPL 값
             spor: SPOR 값
             mvrv: MVRV 값
+            asol: ASOL 값
 
         Returns:
             각 지표별 생성 결과
@@ -816,6 +907,22 @@ class IndicatorService:
             except Exception as e:
                 logger.error(f"MVRV 생성 실패: {str(e)}")
                 results["mvrv"] = {
+                    "success": False,
+                    "error": str(e),
+                }
+
+        # ASOL
+        if asol is not None:
+            try:
+                result = await self.create_asol(db, asol)
+                results["asol"] = {
+                    "success": True,
+                    "value": result["asol"],
+                    "timestamp": result["timestamp"],
+                }
+            except Exception as e:
+                logger.error(f"ASOL 생성 실패: {str(e)}")
+                results["asol"] = {
                     "success": False,
                     "error": str(e),
                 }
