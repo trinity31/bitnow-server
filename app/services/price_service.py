@@ -120,10 +120,23 @@ async def check_ma_cross_all() -> Dict[str, Any]:
                 f"Not enough data to calculate max MA({max(MA_PERIODS)} days). Got {len(closes)} days."
             )
 
+        # 실시간 가격 가져오기
+        current_price_url = "https://api.binance.com/api/v3/ticker/price"
+        current_price_params = {"symbol": "BTCUSDT"}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(current_price_url, params=current_price_params) as response:
+                if response.status == 200:
+                    current_price_data = await response.json()
+                    current_price = float(current_price_data['price'])
+                else:
+                    # 실시간 가격을 가져올 수 없으면 최근 종가 사용
+                    current_price = closes[-1]
+
         # 최근 N=3일간 종가 추출 (2일 연속 여부 확인용)
         #   - day2_close: 바로 전날 종가
-        #   - day1_close: 현재(가장 최근) 종가
-        #   (day3_close는 필요 시 확장 분석용)
+        #   - day1_close: 가장 최근 일봉 종가
+        #   - current_price: 실시간 가격
         day3_close = closes[-3]
         day2_close = closes[-2]
         day1_close = closes[-1]
@@ -146,17 +159,18 @@ async def check_ma_cross_all() -> Dict[str, Any]:
             threshold_up = ma_value * 1.02
             threshold_down = ma_value * 0.98
 
-            # 2일 연속 ±2% 돌파 여부
+            # 2일 연속 ±2% 돌파 여부 (전날 종가 + 실시간 가격)
             def is_confirmed_up(price_list: List[float]) -> bool:
                 return all(price > threshold_up for price in price_list)
 
             def is_confirmed_down(price_list: List[float]) -> bool:
                 return all(price < threshold_down for price in price_list)
 
-            last_two_days = [day2_close, day1_close]
+            # 전날 종가 + 실시간 가격으로 2일 연속 조건 확인
+            last_two_prices = [day1_close, current_price]
 
-            confirmed_up = is_confirmed_up(last_two_days)
-            confirmed_down = is_confirmed_down(last_two_days)
+            confirmed_up = is_confirmed_up(last_two_prices)
+            confirmed_down = is_confirmed_down(last_two_prices)
 
             ma_results[period] = {
                 "ma_value": ma_value,
@@ -168,12 +182,12 @@ async def check_ma_cross_all() -> Dict[str, Any]:
 
         logger.info(f"MA 결과: {ma_results}")
 
-        # GPT-4를 통한 시장 상태 진단
-        market_diagnosis = await analyze_market_state(ma_results, day1_close)
+        # GPT-4를 통한 시장 상태 진단 (실시간 가격 사용)
+        market_diagnosis = await analyze_market_state(ma_results, current_price)
 
-        # 최종 반환에 진단 결과 추가
+        # 최종 반환에 진단 결과 추가 (실시간 가격 반환)
         return {
-            "price": day1_close,
+            "price": current_price,
             "timestamp": int(time.time()),
             "ma_results": ma_results,
             "market_diagnosis": market_diagnosis,
@@ -207,24 +221,39 @@ async def analyze_market_state(
             "ma120_200": ma_values[120] / ma_values[200] - 1,
         }
 
-        # GPT-4 프롬프트 구성
+        # confirmed_up/down 상태 확인
+        confirmed_status = {
+            "ma20": ma_results[20],
+            "ma60": ma_results[60],
+            "ma120": ma_results[120],
+            "ma200": ma_results[200],
+        }
+
+        # GPT-4 프롬프트 구성 (현재 가격 위치를 더 강조)
         prompt = f"""
 현재 비트코인의 이동평균선 상태를 분석해주세요:
 
-현재가와 이동평균선의 관계:
-- 20일선 대비: {price_relations['ma20']:.2%}
-- 60일선 대비: {price_relations['ma60']:.2%}
-- 120일선 대비: {price_relations['ma120']:.2%}
-- 200일선 대비: {price_relations['ma200']:.2%}
+**중요: 현재가({current_price:.2f})와 이동평균선의 위치 관계**
+- MA20({ma_values[20]:.2f}): {price_relations['ma20']:.2%} {'위' if price_relations['ma20'] > 0 else '아래'}
+- MA60({ma_values[60]:.2f}): {price_relations['ma60']:.2%} {'위' if price_relations['ma60'] > 0 else '아래'}
+- MA120({ma_values[120]:.2f}): {price_relations['ma120']:.2%} {'위' if price_relations['ma120'] > 0 else '아래'}
+- MA200({ma_values[200]:.2f}): {price_relations['ma200']:.2%} {'위' if price_relations['ma200'] > 0 else '아래'}
 
-이동평균선 간의 관계:
+2일 연속 ±2% 돌파 확인:
+- MA20: {'상회' if confirmed_status['ma20']['confirmed_up'] else '하회' if confirmed_status['ma20']['confirmed_down'] else '근접'}
+- MA60: {'상회' if confirmed_status['ma60']['confirmed_up'] else '하회' if confirmed_status['ma60']['confirmed_down'] else '근접'}
+
+이동평균선 배열 참고 (추세 보조지표):
 - 20일선/60일선: {ma_relations['ma20_60']:.2%}
 - 60일선/120일선: {ma_relations['ma60_120']:.2%}
-- 120일선/200일선: {ma_relations['ma120_200']:.2%}
 
-위 데이터를 바탕으로 현재 시장 상태를 간단히 진단하고, 향후 전망을 제시해주세요.
+**분석 우선순위:**
+1. 현재가가 단기 MA(20일, 60일) 위에 있으면 단기 상승 전환 신호
+2. MA 배열은 중장기 추세의 참고사항
+
+위 데이터를 바탕으로 현재 시장 상태를 진단해주세요.
 응답은 반드시 다음 형식으로 해주세요:
-{{"trend": "현재 추세를 한 단어로", "description": "상세 설명을 1-2문장으로"}}
+{{"trend": "현재 추세를 한 단어로 (상승/하락/횡보)", "description": "현재 가격 위치 기반 상세 설명을 1-2문장으로"}}
 """
 
         # GPT-4 호출
